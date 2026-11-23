@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>io.github.wahindra</groupId>
+    <artifactId>secure-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>secure-core</artifactId>
+  <name>secure-core</name>
+  <description>Zero-dependency detectors and guards (Java 8+)</description>
+
+  <properties>
+    <vectors.dir>${project.basedir}/../../test-vectors</vectors.dir>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <!-- Scan rules and probe payloads are shared with the JavaScript package; keep one copy. -->
+      <resource>
+        <directory>${project.basedir}/../../devtools</directory>
+        <targetPath>io/github/wahindra/secure/devtools</targetPath>
+        <includes>
+          <include>scan-rules.txt</include>
+          <include>probe-payloads.txt</include>
+        </includes>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>io.github.wahindra.secure.devtools.SecureCli</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

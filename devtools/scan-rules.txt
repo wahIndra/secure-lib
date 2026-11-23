@@ -1,0 +1,525 @@
+# secure-scan rules, shared by the Java and JavaScript scanners.
+#
+# One rule per block, blocks separated by a blank line. Keys:
+#   id           unique rule id (shown in reports and used in suppressions)
+#   lang         comma list of: java (also .kt/.groovy/.scala), js (also .ts/.jsx/.tsx), template, config
+#   severity     HIGH | MEDIUM | LOW
+#   owasp        OwaspCategory constant name
+#   scope        code = string-literal contents are masked before matching (default)
+#                raw  = match the line as written (needed when the literal itself matters)
+#   flags        i = case-insensitive
+#   pattern      regex, using only syntax common to Java and JavaScript (no inline (?i), no possessive)
+#   unless       optional regex: skip the line if it matches (e.g. it already uses the safe API)
+#   unless-file  optional regex: skip the whole file if it matches anywhere
+#   message      what is wrong
+#   fix          how to fix it, preferably with this library
+#
+# Suppress a reviewed finding with a comment on the same line or the line above:
+#   // secure-scan:ignore SQL_STRING_CONCAT -- column list is a compile-time constant
+
+# ------------------------------------------------------------------ A05 Injection: SQL
+
+id: SQL_STRING_CONCAT
+lang: java, js
+severity: HIGH
+owasp: INJECTION
+scope: raw
+flags: i
+pattern: (?<!\\)"\s*(?:select\s[^"]*\sfrom\b|insert\s+into\b|update\s+\w+\s+set\b|delete\s+from\b|merge\s+into\b)[^"]*(?<!\\)"\s*\+\s*[\w(]|(?<!\\)'\s*(?:select\s[^']*\sfrom\b|insert\s+into\b|update\s+\w+\s+set\b|delete\s+from\b|merge\s+into\b)[^']*(?<!\\)'\s*\+\s*[\w(]
+message: SQL statement built by string concatenation
+fix: Use a PreparedStatement / parameterized query with ? (or $1) placeholders. Identifiers such as ORDER BY columns cannot be parameters: use SafeSql.allowlisted(...) or SafeSql.mapped(...).
+
+id: SQL_CLAUSE_CONCAT
+lang: java, js
+severity: MEDIUM
+owasp: INJECTION
+scope: raw
+flags: i
+pattern: (?<!\\)["'][^"']*\b(?:where|order\s+by|group\s+by|having|limit|offset|values\s*\()\s*(?:[\w.]+\s*(?:=|<>|!=|<|>|like|in)\s*)?\(?'?(?<!\\)["']\s*\+\s*[A-Za-z_]
+unless: ["']\s*(?:select\s.*\sfrom\b|insert\s+into\b|update\s+\w+\s+set\b|delete\s+from\b|merge\s+into\b)
+message: SQL clause continued with a concatenated value
+fix: Bind the value as a parameter. For sort columns use SafeSql.allowlisted(...) and SafeSql.direction(...).
+
+id: SQL_TEMPLATE_LITERAL
+lang: js
+severity: HIGH
+owasp: INJECTION
+scope: raw
+flags: i
+pattern: (?<![\w.$])`\s*(?:select\s[^`]*\sfrom\b|insert\s+into\b|update\s+\w+\s+set\b|delete\s+from\b)[^`]*\$\{
+message: SQL statement built with an untagged template literal
+fix: Pass values as parameters (db.query('... WHERE id = $1', [id])) or use a tagged template that parameterizes (sql`...${id}`).
+
+id: SQL_FORMAT
+lang: java
+severity: HIGH
+owasp: INJECTION
+scope: raw
+flags: i
+pattern: (?:String\.format|\.formatted)\s*\(\s*"\s*(?:select|insert|update|delete|merge)\b
+message: SQL statement built with String.format
+fix: Use a PreparedStatement with ? placeholders.
+
+id: SQL_EXECUTE_CONCAT
+lang: java, js
+severity: HIGH
+owasp: INJECTION
+scope: raw
+pattern: \.(?:executeQuery|executeUpdate|executeLargeUpdate|execute|prepareStatement|prepareCall|addBatch|createQuery|createNativeQuery|createSQLQuery|queryForList|queryForObject|queryForMap|queryForRowSet|query|raw)\s*\(\s*(?:[\w.]+\s*\+\s*[\w"']|"[^"]*"\s*\+|'[^']*'\s*\+)
+message: Query executed with a concatenated string
+fix: Keep the SQL text constant and bind values as parameters.
+
+id: SQL_RAW_UNSAFE
+lang: js
+severity: HIGH
+owasp: INJECTION
+pattern: \$(?:queryRawUnsafe|executeRawUnsafe)\s*\(|\bsequelize\.literal\s*\([^)]*(?:req\.|\+|\$\{)|\.whereRaw\s*\([^,)]*(?:\+|\$\{)
+message: Raw/unsafe ORM query with dynamic SQL
+fix: Use the ORM's parameterized form ($queryRaw tagged template, whereRaw('x = ?', [v])).
+
+id: NOSQL_INJECTION
+lang: js
+severity: HIGH
+owasp: INJECTION
+scope: raw
+pattern: \.(?:find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|countDocuments|aggregate)\s*\(\s*req\.(?:body|query|params)\b|["']\$where["']
+message: NoSQL query built directly from request data ($ne / $gt / $where operator injection)
+fix: Build the filter from validated scalar fields, e.g. { email: String(req.body.email) }, and reject objects where strings are expected.
+
+# ------------------------------------------------------------------ A05 Injection: OS command / code
+
+id: CMD_RUNTIME_EXEC
+lang: java
+severity: HIGH
+owasp: INJECTION
+pattern: Runtime\.getRuntime\s*\(\s*\)\s*\.exec\s*\((?:\s*[^")\s]|[^;]*\+)
+message: Runtime.exec with a dynamic command string
+fix: Use SafeCommand.of("/usr/bin/tool").arg(userValue).build() so arguments are never parsed by a shell.
+
+id: CMD_SHELL_PROCESS
+lang: java
+severity: HIGH
+owasp: INJECTION
+scope: raw
+pattern: new\s+ProcessBuilder\s*\(\s*(?:Arrays\.asList\s*\(\s*|List\.of\s*\(\s*)?"(?:/bin/|/usr/bin/)?(?:sh|bash|zsh|cmd|cmd\.exe|powershell|powershell\.exe|pwsh)"
+message: Process started through a shell interpreter
+fix: Call the program directly with SafeCommand; never pass "sh -c" / "cmd /c" a string containing user input.
+
+id: CMD_EXEC_JS
+lang: js
+severity: HIGH
+owasp: INJECTION
+scope: raw
+pattern: (?:(?<![\w.$])|\b(?:child_process|childProcess|cp)\.)exec(?:Sync)?\s*\(\s*(?:`[^`]*\$\{|[\w.]+\s*\+|["'][^"']*["']\s*\+)
+message: child_process.exec with a dynamic command (runs through a shell)
+fix: Use execFile/spawn with an argument array and { shell: false }; validate with safeCommand(executable, args).
+
+id: CMD_SHELL_OPTION
+lang: js
+severity: MEDIUM
+owasp: INJECTION
+pattern: \bshell\s*:\s*true\b
+message: Child process spawned with shell: true
+fix: Remove shell: true and pass arguments as an array.
+
+id: CODE_EVAL
+lang: js
+severity: HIGH
+owasp: INJECTION
+pattern: (?<![\w.$])eval\s*\(|\bnew\s+Function\s*\(|\b(?:setTimeout|setInterval)\s*\(\s*["'`]|\bvm\.runIn(?:New|This)?Context\s*\(
+message: Dynamic code evaluation
+fix: Remove eval/new Function. Parse data with JSON.parse; look up behaviour from a fixed map of functions.
+
+id: CODE_SCRIPT_ENGINE
+lang: java
+severity: MEDIUM
+owasp: INJECTION
+pattern: \bScriptEngine\b[^;]*\.eval\s*\(|\bgetEngineByName\s*\(|\bSpelExpressionParser\s*\(\s*\)[^;]*parseExpression\s*\([^"]|\bOgnl\.getValue\s*\(
+message: Script / expression engine evaluates a dynamic expression
+fix: Never evaluate user-controlled expressions. If needed, use SimpleEvaluationContext (SpEL) and a fixed allowlist.
+
+id: REGEX_INJECTION
+lang: java, js
+severity: HIGH
+owasp: INJECTION
+pattern: Pattern\.compile\s*\([^;]*(?:getParameter|getHeader)\s*\(|\bnew\s+RegExp\s*\([^;]*req\.(?:query|body|params|headers)\b
+message: Regular expression compiled from request data (ReDoS / logic bypass)
+fix: Escape the input (Pattern.quote / a regex-escape helper) or match with indexOf/equals instead.
+
+# ------------------------------------------------------------------ A05 Injection: XSS
+
+id: XSS_DOM_SINK
+lang: js
+severity: MEDIUM
+owasp: INJECTION
+pattern: \.(?:innerHTML|outerHTML)\s*\+?=(?!=)|\.insertAdjacentHTML\s*\(|\bdocument\.write(?:ln)?\s*\(|\bdangerouslySetInnerHTML\b
+unless: forHtml|DOMPurify|sanitize
+message: HTML injected into the DOM
+fix: Use textContent / React text nodes. If HTML is required, sanitize with DOMPurify, or encode with forHtml(...) when building strings.
+
+id: XSS_TEMPLATE_UNESCAPED
+lang: template
+severity: MEDIUM
+owasp: INJECTION
+scope: raw
+pattern: th:utext\s*=|v-html\s*=|\{\{\{|<%-|\|\s*safe\b|\|\s*raw\b|escapeXml\s*=\s*["']false|\?no_esc\b
+message: Template output with HTML escaping turned off
+fix: Use the escaping form (th:text, {{ }}, <%= %>, c:out). Only render trusted, sanitized HTML unescaped.
+
+id: XSS_JSP_SCRIPTLET
+lang: template
+severity: HIGH
+owasp: INJECTION
+scope: raw
+pattern: <%=\s*request\.get(?:Parameter|Header|QueryString)|\$\{\s*param(?:Values)?\.
+message: Request parameter written into a JSP without encoding
+fix: Use <c:out value="${param.x}"/> or Encode.forHtml(request.getParameter("x")).
+
+id: XSS_SERVLET_WRITE
+lang: java
+severity: HIGH
+owasp: INJECTION
+pattern: getWriter\s*\(\s*\)\s*\.(?:print|println|write|append|printf|format)\s*\([^;]*(?:getParameter|getHeader|getQueryString)\s*\(
+unless: Encode\.for
+message: Request data written to the response without encoding
+fix: Encode for the output context: Encode.forHtml(...), Encode.forHtmlAttribute(...), Encode.forJavaScript(...).
+
+id: XSS_EXPRESS_SEND
+lang: js
+severity: HIGH
+owasp: INJECTION
+pattern: \bres\.(?:send|write|end)\s*\([^;]*req\.(?:query|params|body|headers)\b
+unless: forHtml|escape|res\.json
+message: Request data echoed in the response without encoding
+fix: Return JSON (res.json) or encode with forHtml(...) before writing HTML.
+
+# ------------------------------------------------------------------ A01 Broken Access Control: path traversal, redirects, SSRF, CORS
+
+id: PATH_TRAVERSAL_JAVA
+lang: java
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+pattern: (?:new\s+(?:File|FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile)\s*\(|(?:Paths\.get|Path\.of|\b(?:base|dir|root|folder|upload)\w*\.resolve|Files\.(?:newInputStream|newOutputStream|readAllBytes|readString|write|delete|copy))\s*\()[^;]*(?:getParameter|getHeader|getOriginalFilename|getPathInfo)\s*\(
+unless: PathTraversalGuard|SafeFileName|[Gg]uard\w*\.resolve
+message: File path built from request data
+fix: Resolve through PathTraversalGuard.forBaseDirectory(base).resolve(userPath); for upload names use SafeFileName.sanitize(...).
+
+id: PATH_CONCAT_JAVA
+lang: java
+severity: MEDIUM
+owasp: BROKEN_ACCESS_CONTROL
+pattern: new\s+(?:File|FileInputStream|FileOutputStream|FileReader|FileWriter)\s*\(\s*[\w.]+\s*\+
+unless: PathTraversalGuard|SafeFileName
+message: File path built by string concatenation
+fix: If any part comes from a user, resolve it with PathTraversalGuard.resolve(...).
+
+id: PATH_TRAVERSAL_JS
+lang: js
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+pattern: (?:\b(?:readFile|readFileSync|createReadStream|createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|rm|rmSync|stat|statSync|sendFile|download|attachment)\s*\(|\bpath\.(?:join|resolve)\s*\()[^;]*req\.(?:query|params|body|headers)\b
+# A .resolve() that is not path.resolve is assumed to be a PathTraversalGuard instance.
+unless: PathTraversalGuard|SafeFileName|(?<!path)\.resolve\s*\(\s*req\.
+message: File path built from request data
+fix: Use PathTraversalGuard.forBaseDirectory(base).resolve(req.params.name).
+
+id: ZIP_SLIP
+lang: java
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+pattern: (?:new\s+File|Paths\.get|\.resolve)\s*\([^;]*\b\w*[Ee]ntry\.getName\s*\(
+unless: PathTraversalGuard
+message: Archive entry name used as a file path (Zip Slip)
+fix: Resolve each entry with PathTraversalGuard.resolve(entry.getName()) so ../ entries cannot escape the target folder.
+
+id: OPEN_REDIRECT
+lang: java, js
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+pattern: sendRedirect\s*\([^;]*(?:getParameter|getHeader)\s*\(|"redirect:"\s*\+|\bres\.redirect\s*\([^;]*req\.(?:query|body|params|headers)\b|\blocation\.(?:href|assign|replace)\b[^;]*(?:location\.search|location\.hash|URLSearchParams)
+message: Redirect target taken from request data (open redirect)
+fix: Redirect only to relative paths or an allowlist of hosts; reject absolute URLs from the user.
+
+id: SSRF_JAVA
+lang: java
+severity: HIGH
+owasp: SSRF
+pattern: (?:new\s+URL\s*\(|URI\.create\s*\(|\.(?:getForObject|getForEntity|postForObject|postForEntity|exchange|uri)\s*\()[^;]*(?:getParameter|getHeader)\s*\(
+unless: UrlGuard
+message: Outbound request to a URL taken from request data (SSRF)
+fix: Validate with UrlGuard.builder().allowHosts(...).build().validate(url) and connect to the validated addresses.
+
+id: SSRF_JS
+lang: js
+severity: HIGH
+owasp: SSRF
+pattern: \b(?:fetch|axios(?:\.(?:get|post|put|patch|delete|request))?|got|needle|superagent\.(?:get|post)|https?\.(?:get|request))\s*\(\s*(?:req\.(?:query|body|params|headers)\b|`[^`]*\$\{\s*req\.)
+unless: UrlGuard
+message: Outbound request to a URL taken from request data (SSRF)
+fix: Validate with new UrlGuard({ allowHosts: [...] }).validate(url) first.
+
+id: CORS_WILDCARD
+lang: java, js
+severity: MEDIUM
+owasp: SECURITY_MISCONFIGURATION
+scope: raw
+pattern: @CrossOrigin\s*(?:\(\s*\))?\s*$|@CrossOrigin\s*\([^)]*origins\s*=\s*"\*"|(?:allowedOrigins|addAllowedOrigin|allowedOriginPatterns)\s*\(\s*"\*"|\borigin\s*:\s*(?:["']\*["']|true\b)|Access-Control-Allow-Origin["']?\s*,\s*["']\*
+message: CORS allows any origin
+fix: List the exact front-end origins that may call this API.
+
+id: SPRING_PERMIT_ALL
+lang: java
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+pattern: anyRequest\s*\(\s*\)\s*\.permitAll\s*\(
+message: Every request is permitted by default
+fix: Deny by default: anyRequest().authenticated() (or denyAll()) and permitAll only the public paths. See RouteAccessPolicy.
+
+id: SPRING_CSRF_DISABLED
+lang: java
+severity: MEDIUM
+owasp: BROKEN_ACCESS_CONTROL
+pattern: csrf\s*\(\s*\)\s*\.disable\s*\(|csrf\s*\(\s*(?:AbstractHttpConfigurer::disable|\w+\s*->\s*\w+\.disable\s*\(\s*\))
+message: CSRF protection disabled
+fix: Keep CSRF on for cookie/session authentication. Disabling is only safe for stateless APIs authenticated by a header token.
+
+id: IDOR_LOOKUP
+lang: java, js
+severity: LOW
+owasp: BROKEN_ACCESS_CONTROL
+pattern: \b(?:findById|getById|getReferenceById|findByPk)\s*\(\s*(?:id|\w+Id|req\.params\.\w+)\s*\)
+unless-file: AccessGuard|requireOwner|@PreAuthorize|@PostAuthorize|@Secured|hasPermission|tenantId|ownerId
+message: Record loaded by id with no ownership check in this file (possible IDOR)
+fix: After loading, call AccessGuard.requireOwnerOrRole(user, record.getOwnerId(), "ADMIN") / requireSameTenant(...), or query by (id, ownerId).
+
+id: MASS_ASSIGNMENT_JS
+lang: js
+severity: MEDIUM
+owasp: BROKEN_ACCESS_CONTROL
+pattern: \b(?:Object\.assign|_\.merge|_\.extend|merge|deepmerge|extend)\s*\([^;]*req\.(?:body|query)\b|\[\s*req\.(?:body|query|params)\.\w+\s*\]\s*=|\.(?:create|update|save)\s*\(\s*req\.body\s*\)
+unless: requireNoProtectedFields|pick\(
+message: Request body copied onto an object or model (mass assignment / prototype pollution)
+fix: Copy only the fields the user may change, and call AccessGuard.requireNoProtectedFields(req.body, 'role', 'ownerId').
+
+# ------------------------------------------------------------------ A04 Cryptographic Failures / A07 Authentication Failures
+
+id: WEAK_HASH
+lang: java, js
+severity: MEDIUM
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+flags: i
+pattern: MessageDigest\.getInstance\s*\(\s*"(?:MD2|MD4|MD5|SHA-?1|SHA)"|createHash\s*\(\s*["'](?:md4|md5|sha1)["']|DigestUtils\.(?:md5|sha1|sha)(?:Hex)?\s*\(
+message: Weak hash algorithm (MD5/SHA-1)
+fix: Use SHA-256 for integrity checks; for passwords use PasswordHasher (PBKDF2, 600k iterations).
+
+id: PASSWORD_FAST_HASH
+lang: java, js
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+flags: i
+pattern: (?:MessageDigest|createHash|DigestUtils|Hashing\.sha|sha256|sha512)[^;]*passw(?:or)?d|passw(?:or)?d[^;]*(?:MessageDigest|createHash|DigestUtils|\.digest\s*\()
+unless: PasswordHasher|pbkdf2|bcrypt|scrypt|argon2
+message: Password hashed with a fast hash
+fix: Use PasswordHasher.hash(...) / verify(...) (PBKDF2-SHA256, salted, 600k iterations).
+
+id: WEAK_CIPHER
+lang: java, js
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+flags: i
+pattern: Cipher\.getInstance\s*\(\s*"(?:DES|DESede|RC2|RC4|ARCFOUR|Blowfish|AES|AES/ECB[^"]*|[^"]*/ECB/[^"]*)"|createCipheriv\s*\(\s*["'](?:des|des-ede3|rc2|rc4|bf|aes-\d+-ecb)[^"']*["']|\bcreateCipher\s*\(
+message: Weak or ECB-mode cipher ("AES" alone defaults to ECB)
+fix: Use AES/GCM/NoPadding (Java) or aes-256-gcm (Node) with a random 12-byte IV per message.
+
+id: INSECURE_RANDOM
+lang: java, js
+severity: MEDIUM
+owasp: CRYPTOGRAPHIC_FAILURES
+flags: i
+pattern: (?:token|passw|secret|otp|salt|nonce|session|apikey|api_key|reset|verif|captcha)[^;]*(?:new\s+Random\s*\(|Math\.random\s*\(|ThreadLocalRandom)|(?:new\s+Random\s*\(|Math\.random\s*\(|ThreadLocalRandom)[^;]*(?:token|passw|secret|otp|salt|nonce|session|apikey|reset|verif)
+message: Predictable random number used for a security value
+fix: Use SecureTokens.urlSafe() (Java) / randomToken() (Node), which use SecureRandom / crypto.randomBytes.
+
+id: HARDCODED_SECRET
+lang: java, js
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+flags: i
+pattern: \b\w*(?:password|passwd|pwd|secret|api[_-]?key|apikey|access[_-]?key|private[_-]?key|client[_-]?secret|auth[_-]?token|bearer)\w*["']?\s*[:=]\s*["'][^"'\s$<{]{8,}["']
+unless: example|changeme|change-me|dummy|placeholder|your[_-]|xxxx|\*\*\*\*|<.*>|process\.env|System\.getenv|getProperty
+message: Secret hard-coded in source
+fix: Load it from the environment or a secret manager (System.getenv / process.env / Vault) and rotate the leaked value.
+
+id: CLOUD_KEY
+lang: java, js, config, template
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+pattern: \bAKIA[0-9A-Z]{16}\b|-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bAIza[0-9A-Za-z_-]{35}\b|\bsk_live_[0-9A-Za-z]{20,}\b
+message: Cloud / API credential or private key committed to source
+fix: Remove it, rotate it immediately, and load it from a secret manager.
+
+id: TLS_VALIDATION_DISABLED
+lang: java, js
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+pattern: NoopHostnameVerifier|ALLOW_ALL_HOSTNAME_VERIFIER|[Tt]rust_?[Aa]ll(?:Certs|Manager|Strategy)|TrustSelfSignedStrategy|HostnameVerifier[^;]*->\s*true|\brejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED["']?\]?\s*=|\bstrictSSL\s*:\s*false
+message: TLS certificate or hostname validation disabled
+fix: Keep validation on. For internal CAs, add the CA certificate to the trust store instead.
+
+id: COOKIE_FLAGS
+lang: java, js
+severity: MEDIUM
+owasp: AUTHENTICATION_FAILURES
+scope: raw
+pattern: setHttpOnly\s*\(\s*false|setSecure\s*\(\s*false|\bhttpOnly\s*:\s*false|\bsecure\s*:\s*false|\bsameSite\s*:\s*["']none["']
+message: Session / auth cookie without HttpOnly, Secure or SameSite protection
+fix: Set HttpOnly, Secure and SameSite=Lax (or Strict) on authentication cookies.
+
+id: JWT_UNVERIFIED
+lang: java, js
+severity: HIGH
+owasp: AUTHENTICATION_FAILURES
+scope: raw
+pattern: algorithms\s*:\s*\[[^\]]*["']none["']|\bjwt\.decode\s*\(|\.parseUnsecuredClaims\s*\(|\.parseClaimsJwt\s*\(|\bJWT\.decode\s*\(
+unless: verify
+message: JWT read without signature verification (or alg "none" accepted)
+fix: Use jwt.verify(token, key, { algorithms: ['RS256'] }) / parseSignedClaims with a fixed algorithm.
+
+# ------------------------------------------------------------------ A08 Integrity
+
+id: UNSAFE_DESERIALIZATION
+lang: java
+severity: HIGH
+owasp: INTEGRITY_FAILURES
+pattern: \bnew\s+ObjectInputStream\s*\(|\bnew\s+XMLDecoder\s*\(|\b(?:enableDefaultTyping|activateDefaultTyping)\s*\(|JsonTypeInfo\.Id\.(?:CLASS|MINIMAL_CLASS)|\bXStream\s*\(\s*\)[^;]*fromXML|\bnew\s+Yaml\s*\(\s*\)
+message: Deserialization that can instantiate arbitrary classes (gadget chains / RCE)
+fix: Prefer JSON into explicit DTOs. If Java serialization is unavoidable, use SafeObjectInputStream with a class allowlist; for SnakeYAML use SafeConstructor.
+
+id: UNSAFE_DESERIALIZATION_JS
+lang: js
+severity: HIGH
+owasp: INTEGRITY_FAILURES
+pattern: \b(?:unserialize|deserialize)\s*\([^)]*req\.|require\s*\(\s*["']node-serialize["']\s*\)|\byaml\.load\s*\([^)]*req\.
+message: Deserialization of request data with a library that can execute code
+fix: Use JSON.parse and validate the shape; for YAML use a safe schema.
+
+id: XXE
+lang: java
+severity: MEDIUM
+owasp: SECURITY_MISCONFIGURATION
+pattern: \b(?:DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory|SchemaFactory|XMLReaderFactory)\.(?:newInstance|newFactory|createXMLReader)\s*\(|\bnew\s+(?:SAXReader|SAXBuilder)\s*\(
+unless-file: disallow-doctype-decl|FEATURE_SECURE_PROCESSING|ACCESS_EXTERNAL_DTD|SUPPORT_DTD|external-general-entities
+message: XML parser created without disabling DOCTYPE / external entities in this file (XXE)
+fix: factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) and set XMLConstants.ACCESS_EXTERNAL_DTD / ACCESS_EXTERNAL_SCHEMA to "".
+
+# ------------------------------------------------------------------ A09 Logging / A10 Exceptional conditions
+
+id: LOG_INJECTION
+lang: java, js
+severity: MEDIUM
+owasp: LOGGING_ALERTING_FAILURES
+pattern: \b(?:log|logger|LOG|LOGGER|console)\.(?:trace|debug|info|warn|warning|error|log)\s*\([^;]*(?:getParameter|getHeader|getQueryString)\s*\(|\bconsole\.(?:log|info|warn|error|debug)\s*\([^;]*req\.(?:query|body|params|headers)\b
+unless: LogSanitizer|sanitizeForLog
+message: Request data written to the log unsanitized (log forging, secrets in logs)
+fix: Wrap the value: LogSanitizer.sanitize(value) / sanitizeForLog(value).
+
+id: LOG_SECRET
+lang: java, js
+severity: MEDIUM
+owasp: LOGGING_ALERTING_FAILURES
+flags: i
+pattern: \b(?:log|logger|console)\.\w+\s*\([^;]*\b(?:password|passwd|secret|token|authorization|apikey|api_key)\b
+unless: mask|sanitize|LogSanitizer|sanitizeForLog|\*\*\*
+message: Possible secret written to the log
+fix: Do not log credentials; if the value is needed for debugging, use LogSanitizer.maskSecrets(...).
+
+id: ERROR_DETAIL_LEAK
+lang: java, js
+severity: HIGH
+owasp: EXCEPTIONAL_CONDITIONS
+pattern: printStackTrace\s*\(\s*(?:response|resp|res)\.getWriter|getWriter\s*\(\s*\)\s*\.(?:print|println|write)\s*\([^;]*(?:getMessage|getStackTrace|getLocalizedMessage)\s*\(|\bres\.(?:status\s*\(\s*\d+\s*\)\s*\.)?(?:send|json)\s*\([^;]*\b(?:err|error|e|ex)\.(?:stack|message)\b
+message: Exception details returned to the client
+fix: Log with SafeErrors.log(...) / logError(...) and return SafeErrors.publicBody(id) / publicErrorBody(id).
+
+id: PRINT_STACK_TRACE
+lang: java
+severity: LOW
+owasp: EXCEPTIONAL_CONDITIONS
+pattern: \.printStackTrace\s*\(\s*\)
+message: printStackTrace() goes to stdout, bypassing log handling and alerting
+fix: Log through your logger, e.g. SafeErrors.log(LOG, e, "context").
+
+id: EMPTY_CATCH
+lang: java, js
+severity: LOW
+owasp: EXCEPTIONAL_CONDITIONS
+pattern: \bcatch\s*(?:\([^)]*\))?\s*\{\s*\}
+message: Exception swallowed silently
+fix: Handle it, log it, or rethrow. A swallowed security exception usually means failing open.
+
+# ------------------------------------------------------------------ A02 Security Misconfiguration (config files)
+
+id: CONFIG_STACKTRACE
+lang: config
+severity: HIGH
+owasp: SECURITY_MISCONFIGURATION
+scope: raw
+flags: i
+pattern: include-stacktrace\s*[=:]\s*["']?always|include-exception\s*[=:]\s*["']?true|include-message\s*[=:]\s*["']?always
+message: Error responses include stack traces or exception details
+fix: Set server.error.include-stacktrace=never and include-message=never.
+
+id: CONFIG_ACTUATOR_EXPOSED
+lang: config
+severity: HIGH
+owasp: SECURITY_MISCONFIGURATION
+scope: raw
+pattern: exposure\.include\s*[=:]\s*["']?\*|^\s*include\s*:\s*["']?\*["']?\s*$|endpoint\.(?:env|heapdump|shutdown)\.enabled\s*[=:]\s*true
+message: All actuator endpoints exposed (env, heapdump, ...)
+fix: Expose only health and info: management.endpoints.web.exposure.include=health,info.
+
+id: CONFIG_DEV_TOOLS
+lang: config
+severity: MEDIUM
+owasp: SECURITY_MISCONFIGURATION
+scope: raw
+flags: i
+pattern: h2\.console\.enabled\s*[=:]\s*true|^\s*debug\s*[=:]\s*true\s*$|graphiql\.enabled\s*[=:]\s*true|swagger-ui\.enabled\s*[=:]\s*true
+message: Development tool or debug mode enabled
+fix: Enable these only in a dev profile (application-dev.*), never in the default configuration.
+
+id: CONFIG_INSECURE_COOKIE
+lang: config
+severity: MEDIUM
+owasp: AUTHENTICATION_FAILURES
+scope: raw
+flags: i
+pattern: cookie\.(?:secure|http-only)\s*[=:]\s*false|same-site\s*[=:]\s*none
+message: Session cookie protection disabled in configuration
+fix: server.servlet.session.cookie.secure=true, http-only=true, same-site=lax.
+
+id: CONFIG_SECRET
+lang: config
+severity: HIGH
+owasp: CRYPTOGRAPHIC_FAILURES
+scope: raw
+flags: i
+pattern: (?:^|[\s.])(?:password|passwd|secret|api[_-]?key|access[_-]?key|client[_-]?secret|token|credentials)\s*[=:]\s*["']?[^\s"'$#{<][^\s"']{5,}
+unless: \$\{|changeme|example|placeholder|<|your[_-]|xxxx
+message: Secret value written directly in configuration
+fix: Reference an environment variable or secret store instead, e.g. password=${DB_PASSWORD}.
+
+id: CONFIG_CORS_WILDCARD
+lang: config
+severity: MEDIUM
+owasp: SECURITY_MISCONFIGURATION
+scope: raw
+flags: i
+pattern: (?:allowed-origins|cors[_.-]?origins?|allowedOrigins)\s*[=:]\s*["']?\*
+message: CORS allows any origin
+fix: List the exact allowed origins.

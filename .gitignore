@@ -1,0 +1,15 @@
+# Build output
+target/
+*.class
+node_modules/
+*.tgz
+js/devtools/
+
+# Scanner / coverage reports
+*.sarif
+coverage/
+
+# IDE
+.idea/
+*.iml
+.vscode/

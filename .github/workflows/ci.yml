@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: Java ${{ matrix.java }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        java: ["8", "11", "17", "21", "25"]
+        include:
+          # Windows path handling (drive letters, backslashes, junctions) differs from Linux.
+          - os: windows-latest
+            java: "21"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+          cache-dependency-path: java/**/pom.xml
+
+      - name: Build and test
+        working-directory: java
+        shell: bash
+        run: mvn -B -ntp verify ${{ matrix.java == '21' && matrix.os == 'ubuntu-latest' && '-Pcoverage' || '' }}
+
+      - name: Upload coverage report
+        if: matrix.java == '21' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: java/secure-core/target/site/jacoco/
+          if-no-files-found: error
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: surefire-reports-java${{ matrix.java }}-${{ matrix.os }}
+          path: java/**/target/surefire-reports/
+
+  node:
+    name: Node ${{ matrix.node }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: ["20", "22", "24", "26"]
+        include:
+          - os: windows-latest
+            node: "24"
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Test
+        if: matrix.node != '24' || matrix.os != 'ubuntu-latest'
+        run: npm test
+
+      - name: Test with coverage
+        if: matrix.node == '24' && matrix.os == 'ubuntu-latest'
+        run: npm run coverage
+
+      - name: Check the published package contents
+        if: matrix.node == '24' && matrix.os == 'ubuntu-latest'
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e "const f=require('./pack.json')[0].files.map(x=>x.path); for (const p of ['bin/secure.js','devtools/scan-rules.txt','devtools/probe-payloads.txt','src/index.js','index.d.ts']) { if (!f.includes(p)) { console.error('missing from package: '+p); process.exit(1); } } console.log(f.length+' files OK')"
+
+  security-scan:
+    name: Security scan (secure scan)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # The repository scans itself with its own rules. test-vectors/ (intentionally vulnerable
+      # fixtures) is excluded by default.
+      - name: Scan (SARIF)
+        run: node js/bin/secure.js scan . --format sarif --output secure-scan.sarif --fail-on none
+
+      - name: Upload to code scanning
+        # Pull requests from forks get a read-only token; skip the upload there.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: secure-scan.sarif
+          category: secure-scan
+
+      - name: Fail on HIGH findings
+        run: node js/bin/secure.js scan . --fail-on high
+
+  rules-in-sync:
+    name: Java and JavaScript agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: java/**/pom.xml
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # Both CLIs load the same devtools/ files; their reports on the shared fixtures must match.
+      - name: Compare scanner output
+        shell: bash
+        run: |
+          (cd java && mvn -B -ntp -q package -DskipTests)
+          JAR=$(ls java/secure-core/target/secure-core-*.jar | head -n1)
+          java -jar "$JAR" scan test-vectors/scan --format json --fail-on none > java.json
+          node js/bin/secure.js scan test-vectors/scan --format json --fail-on none > js.json
+          node .github/scripts/compare-scanners.mjs java.json js.json

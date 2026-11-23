@@ -1,0 +1,52 @@
+{
+  // Copy into .vscode/tasks.json. "Terminal > Run Task > secure: scan" puts every finding in the
+  // Problems panel with squiggles in the editor (HIGH = error, MEDIUM = warning, LOW = info).
+  // Use "secure: scan (watch on save)" with the "Trigger Task on Save" extension, or bind a key.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "secure: scan",
+      "type": "shell",
+      // Node projects: "npx secure scan --no-fix". Java-only machines: "java -jar /path/to/secure-core.jar scan --no-fix".
+      "command": "npx secure scan --no-fix --fail-on none",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "silent", "clear": true },
+      "problemMatcher": [
+        {
+          "owner": "secure-scan",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "severity": "error",
+          "pattern": { "regexp": "^(.+):(\\d+):(\\d+): HIGH (\\S+) (.*)$", "file": 1, "line": 2, "column": 3, "code": 4, "message": 5 }
+        },
+        {
+          "owner": "secure-scan",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "severity": "warning",
+          "pattern": { "regexp": "^(.+):(\\d+):(\\d+): MEDIUM (\\S+) (.*)$", "file": 1, "line": 2, "column": 3, "code": 4, "message": 5 }
+        },
+        {
+          "owner": "secure-scan",
+          "fileLocation": ["relative", "${workspaceFolder}"],
+          "severity": "info",
+          "pattern": { "regexp": "^(.+):(\\d+):(\\d+): LOW (\\S+) (.*)$", "file": 1, "line": 2, "column": 3, "code": 4, "message": 5 }
+        }
+      ]
+    },
+    {
+      "label": "secure: check value",
+      "type": "shell",
+      "command": "npx secure check \"${input:value}\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "secure: probe local endpoint",
+      "type": "shell",
+      "command": "npx secure probe \"${input:url}\"",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    { "id": "value", "type": "promptString", "description": "Value to check, e.g. 1;SELECT pg_sleep(5)--" },
+    { "id": "url", "type": "promptString", "description": "Local URL with FUZZ", "default": "http://localhost:8080/api/orders?id=FUZZ" }
+  ]
+}

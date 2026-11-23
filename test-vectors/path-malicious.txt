@@ -1,0 +1,17 @@
+# Every line MUST be flagged malicious by the path traversal detector.
+../../../etc/passwd
+..\..\..\windows\win.ini
+....//....//etc/passwd
+%2e%2e%2f%2e%2e%2fetc%2fpasswd
+%252e%252e%252fetc%252fpasswd
+..%c0%af..%c0%afetc/passwd
+%c0%ae%c0%ae/%c0%ae%c0%ae/secret
+..%5c..%5cboot.ini
+/var/www/../../etc/shadow
+report.pdf%00.png
+WEB-INF/web.xml
+file:///etc/passwd
+php://filter/convert.base64-encode/resource=index.php
+/proc/self/environ
+..;/admin
+.git/config

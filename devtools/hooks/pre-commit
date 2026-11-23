@@ -1,0 +1,54 @@
+#!/bin/sh
+# secure-scan pre-commit hook: blocks a commit that adds HIGH security findings.
+#
+# Install in a project (pick one):
+#   cp path/to/devtools/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+#   git config core.hooksPath path/to/devtools/hooks
+#
+# Scanner used, first match wins:
+#   $SECURE_SCAN               full command line, quote paths with spaces:
+#                              SECURE_SCAN='java -jar "C:/Program Files/secure/secure-core.jar" scan'
+#   ./node_modules/.bin/secure (npm install --save-dev @wahindra/secure)
+#   secure on PATH             (npm install -g @wahindra/secure)
+#   $SECURE_JAR                path to secure-core-<version>.jar
+#
+# Options via environment: SECURE_FAIL_ON=high|medium|low (default high).
+# Bypass once, deliberately: git commit --no-verify
+
+FAIL_ON="${SECURE_FAIL_ON:-high}"
+
+# A function (not a command string) so paths with spaces, e.g. "C:/Program Files/...", survive.
+if [ -n "$SECURE_SCAN" ]; then
+  # eval so quotes inside SECURE_SCAN are honoured; the variable is set by the developer, not by input.
+  scan() { eval "$SECURE_SCAN \"\$@\""; }
+elif [ -x ./node_modules/.bin/secure ]; then
+  scan() { ./node_modules/.bin/secure scan "$@"; }
+elif command -v secure >/dev/null 2>&1; then
+  scan() { secure scan "$@"; }
+elif [ -n "$SECURE_JAR" ] && [ -f "$SECURE_JAR" ]; then
+  scan() { java -jar "$SECURE_JAR" scan "$@"; }
+else
+  echo "secure-scan: no scanner found (set SECURE_SCAN or SECURE_JAR, or npm install @wahindra/secure); skipping." >&2
+  exit 0
+fi
+
+# Staged files that were added, copied or modified, and that the scanner understands.
+FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(java|kt|kts|groovy|scala|js|mjs|cjs|ts|mts|cts|jsx|tsx|html?|jspx?|vue|svelte|ftl|hbs|ejs|njk|twig|properties|ya?ml|conf)$|(^|/)\.env(\..*)?$')
+[ -z "$FILES" ] && exit 0
+
+# Word splitting on FILES is intended (one path per line; file names with spaces are not supported).
+# shellcheck disable=SC2086
+OUTPUT=$(scan --fail-on "$FAIL_ON" --no-fix $FILES 2>&1)
+STATUS=$?
+printf '%s\n' "$OUTPUT"
+[ $STATUS -eq 0 ] && exit 0
+
+echo "" >&2
+if [ $STATUS -eq 1 ] && printf '%s' "$OUTPUT" | grep -q 'finding(s) ('; then
+  echo "secure-scan: commit blocked by $FAIL_ON findings above. Fix them, or suppress a reviewed one with" >&2
+  echo "  // secure-scan:ignore RULE_ID -- reason" >&2
+else
+  # Fail closed: a broken scanner must not silently let code through. Bypass with --no-verify.
+  echo "secure-scan: the scanner failed to run (exit $STATUS); commit blocked. Check SECURE_SCAN / SECURE_JAR." >&2
+fi
+exit 1

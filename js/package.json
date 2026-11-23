@@ -1,0 +1,64 @@
+{
+  "name": "@wahindra/secure",
+  "version": "0.1.0",
+  "description": "OWASP Top 10 prevention helpers for Node.js: injection detection, path traversal and access control guards, SSRF validation, password hashing, CSRF, security headers.",
+  "keywords": [
+    "security",
+    "owasp",
+    "sql-injection",
+    "xss",
+    "path-traversal",
+    "ssrf",
+    "access-control",
+    "csrf"
+  ],
+  "homepage": "https://github.com/wahIndra/secure-lib#readme",
+  "bugs": {
+    "url": "https://github.com/wahIndra/secure-lib/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wahIndra/secure-lib.git",
+    "directory": "js"
+  },
+  "license": "MIT",
+  "author": "Wahyu Indrawan (https://github.com/wahIndra)",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./express": {
+      "types": "./express.d.ts",
+      "default": "./src/express.js"
+    },
+    "./devtools": {
+      "types": "./devtools.d.ts",
+      "default": "./src/devtools.js"
+    }
+  },
+  "bin": {
+    "secure": "./bin/secure.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "devtools",
+    "index.d.ts",
+    "express.d.ts",
+    "devtools.d.ts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "coverage": "node --test --experimental-test-coverage",
+    "bench": "node bench/bench.js",
+    "prepack": "node -e \"require('fs').cpSync('../devtools','devtools',{recursive:true})\"",
+    "scan": "node bin/secure.js scan"
+  }
+}

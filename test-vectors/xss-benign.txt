@@ -1,0 +1,9 @@
+# MUST NOT be flagged malicious.
+a < b and c > d
+I <3 this product
+Use the onload event in your own code
+<b>bold</b> and <i>italic</i>
+Price: 5 > 3
+My script runs at noon
+javascript is my favourite language
+Call alert in the docs

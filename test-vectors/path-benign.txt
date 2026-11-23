@@ -1,0 +1,7 @@
+# MUST NOT be flagged malicious.
+report.pdf
+images/2026/photo.jpg
+my.file.name.txt
+docs/readme.md
+Wait... what?
+v1.2.3

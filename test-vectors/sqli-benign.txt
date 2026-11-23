@@ -1,0 +1,28 @@
+# Legitimate input that MUST NOT be flagged malicious (false-positive guard).
+O'Brien
+D'Angelo & Sons
+John Smith
+john.smith@example.com
+Please select an option or two from the list
+We will execute the plan and sleep well tonight
+Union Square, New York
+rock and roll
+It's 5 o'clock; drop by anytime
+The method may raise exception X when the file is missing
+I want to update my profile; select a new avatar
+Order #1042 - 3 items
+SELECT your favourite colour
+1 or 2 apples
+50% off - today only!
+C++ and C# developers
+Version 2.1 (beta)
+https://example.com/search?q=shoes&sort=price
+Rua São João, 25
+東京都渋谷区
+Tom & Jerry ; cat lovers unite
+email me at a@b.co -- thanks
+The ratio is 1:1
+Cost = 5 or more
+I'll be there (maybe) -- Ann
+Do you know the version of Java?
+we do $5 deals every friday

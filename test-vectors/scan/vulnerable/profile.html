@@ -1,0 +1,10 @@
+<!-- Scanner fixture: intentionally vulnerable templates. -->
+<!-- expect-next: XSS_TEMPLATE_UNESCAPED -->
+<p th:utext="${user.bio}"></p>
+<!-- expect-next: XSS_TEMPLATE_UNESCAPED -->
+<div v-html="comment.body"></div>
+<!-- expect-next: XSS_JSP_SCRIPTLET -->
+<p>Hello <%= request.getParameter("name") %></p>
+<!-- expect-next: XSS_TEMPLATE_UNESCAPED -->
+<div>{{{ user.signature }}}</div>
+<a href="https://example.com/docs">Docs</a>

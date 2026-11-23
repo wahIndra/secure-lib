@@ -1,0 +1,50 @@
+version: 2
+
+updates:
+  # Maven multi-module build (java/pom.xml and its modules).
+  - package-ecosystem: maven
+    directory: /java
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels: [dependencies, java]
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      maven-plugins:
+        patterns: ["org.apache.maven.plugins:*", "org.jacoco:*"]
+      junit:
+        patterns: ["org.junit*"]
+    ignore:
+      # The library supports Java 8. These majors require a newer JDK, so they are upgraded
+      # deliberately (together with the minimum Java version), not by a weekly bot PR.
+      - dependency-name: "org.junit*"
+        update-types: ["version-update:semver-major"]          # JUnit 6 needs Java 17
+      - dependency-name: "jakarta.servlet:jakarta.servlet-api"
+        update-types: ["version-update:semver-major"]          # Servlet 6 needs Java 11
+      - dependency-name: "javax.servlet:javax.servlet-api"
+        update-types: ["version-update:semver-major"]          # javax is frozen at 4.x
+
+  # npm package in js/ (no runtime dependencies today; keeps future ones current).
+  - package-ecosystem: npm
+    directory: /js
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, javascript]
+    commit-message:
+      prefix: "build(deps)"
+
+  # Actions used by .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
