@@ -129,43 +129,50 @@ export function validatePassword(password, { username, minLength = 12, maxLength
  * In-memory brute-force / credential-stuffing protection. Key by account and, separately,
  * by client IP. For multiple instances, back it with a shared store using the same rules.
  *
- * Capacity: at most `maxTrackedKeys` keys. Only entries whose window and lockout have both
- * expired are removed; live counters are never evicted (that would let an attacker reset a
- * victim's counter by flooding the limiter). When full of live entries it fails closed: keys it
- * is not already tracking are reported as locked until expired entries free space (at most one
- * window). Size `maxTrackedKeys` for your traffic and alert on `saturated`.
+ * Bounded memory without blocking anyone: at most `maxTrackedKeys` keys are kept. Expired
+ * entries are dropped first. If the limiter is still full, it evicts the entry with the fewest
+ * live failures (oldest first), and active lockouts only after every unlocked entry. Unknown keys
+ * are never refused, so a flood of throwaway usernames cannot lock out real users.
+ *
+ * The cost of an attack keeps this safe: to evict a victim holding k failures, an attacker must
+ * first fill the whole table with entries holding at least k failures each, i.e. at least
+ * k * maxTrackedKeys failed attempts to win back k guesses. That is at most one extra guess per
+ * maxTrackedKeys (default 100,000) attacker requests. Put a per-IP limiter in front so a single
+ * source cannot generate that volume at all.
  */
 export class LoginAttemptLimiter {
+  #entries = new Map();
+  /** #levels[n]: entries at that level (failures while unlocked, maxFailures once locked), oldest first. */
+  #levels;
+  #lastMaintenance = -Infinity;
+  #evictions = 0;
+
   constructor({ maxFailures = 5, windowMs = 15 * 60_000, lockoutMs = 15 * 60_000, maxTrackedKeys = 100_000, now = Date.now } = {}) {
+    if (!(maxFailures >= 1) || !(maxTrackedKeys >= 1)) throw new RangeError('maxFailures and maxTrackedKeys must be positive');
     Object.assign(this, { maxFailures, windowMs, lockoutMs, maxTrackedKeys, now });
-    this.entries = new Map();
+    this.#levels = Array.from({ length: maxFailures + 1 }, () => new Map());
   }
 
   isLocked(key) {
-    const now = this.now();
-    const e = this.entries.get(key);
-    return e ? e.lockedUntil > now : !this.#hasRoom(now);
+    const e = this.#entries.get(key);
+    return !!e && e.lockedUntil > this.now();
   }
 
   /** Remaining lock in ms (0 if not locked). Use for the Retry-After header. */
   retryAfterMs(key) {
-    const now = this.now();
-    const e = this.entries.get(key);
-    if (!e) return this.#hasRoom(now) ? 0 : this.windowMs;
-    return Math.max(0, e.lockedUntil - now);
+    const e = this.#entries.get(key);
+    return e ? Math.max(0, e.lockedUntil - this.now()) : 0;
   }
 
   recordFailure(key) {
     const now = this.now();
-    let e = this.entries.get(key);
+    let e = this.#entries.get(key);
     if (!e) {
-      // Saturated: the key is already reported as locked by isLocked(), so the caller should not
-      // have verified a password for it. Nothing to record.
-      if (!this.#hasRoom(now)) return;
-      e = { failures: 0, windowStart: now, lockedUntil: 0 };
-      this.entries.set(key, e);
+      if (this.#entries.size >= this.maxTrackedKeys) this.#makeRoom(now);
+      e = { key, failures: 0, windowStart: now, lockedUntil: 0, level: 0 };
+      this.#entries.set(key, e);
     }
-    if (now - e.windowStart > this.windowMs) {
+    if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) {
       e.windowStart = now;
       e.failures = 0;
     }
@@ -175,38 +182,56 @@ export class LoginAttemptLimiter {
       e.failures = 0;
       e.windowStart = now;
     }
+    this.#moveTo(e, e.lockedUntil > now ? this.maxFailures : e.failures);
   }
 
   recordSuccess(key) {
-    this.entries.delete(key);
-  }
-
-  /** True while the limiter is full of live entries and fails closed for new keys. */
-  get saturated() {
-    return !this.#hasRoom(this.now());
+    const e = this.#entries.get(key);
+    if (!e) return;
+    this.#entries.delete(key);
+    this.#levels[e.level].delete(key);
   }
 
   /** Number of keys currently tracked (for monitoring). */
   get trackedKeys() {
-    return this.entries.size;
+    return this.#entries.size;
   }
 
-  /**
-   * Whether a new key can be tracked. When full, removes expired entries; the scan runs at most
-   * once per second so a flood of new keys cannot turn every request into an O(n) scan.
-   */
-  #hasRoom(now) {
-    if (this.entries.size < this.maxTrackedKeys) return true;
+  /** Entries evicted to stay under the cap since start. A steady rise means a flood: alert on it. */
+  get evictionCount() {
+    return this.#evictions;
+  }
+
+  #moveTo(e, level) {
+    if (e.level !== level || !this.#levels[level].has(e.key)) {
+      this.#levels[e.level].delete(e.key);
+      e.level = level;
+      this.#levels[level].set(e.key, e);
+    }
+  }
+
+  #makeRoom(now) {
+    // Expired entries cost nothing to drop. The full scan runs at most once per second so a flood
+    // cannot turn every failed login into an O(n) pass.
     if (now - this.#lastMaintenance >= MAINTENANCE_INTERVAL_MS) {
       this.#lastMaintenance = now;
-      for (const [k, e] of this.entries) {
-        if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) this.entries.delete(k);
+      for (const [k, e] of this.#entries) {
+        if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) {
+          this.#entries.delete(k);
+          this.#levels[e.level].delete(k);
+        }
       }
     }
-    return this.entries.size < this.maxTrackedKeys;
+    // Still full: evict the weakest entry, i.e. fewest failures, oldest first, lockouts last.
+    for (const level of this.#levels) {
+      for (const k of level.keys()) {
+        if (this.#entries.size < this.maxTrackedKeys) return;
+        level.delete(k);
+        this.#entries.delete(k);
+        this.#evictions++;
+      }
+    }
   }
-
-  #lastMaintenance = -Infinity;
 }
 
 const MAINTENANCE_INTERVAL_MS = 1000;

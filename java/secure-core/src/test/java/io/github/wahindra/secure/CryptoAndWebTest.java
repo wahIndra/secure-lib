@@ -84,32 +84,46 @@ class CryptoAndWebTest {
     }
 
     @Test
-    void loginLimiterFloodCannotResetACounterOrDisableProtection() {
+    void loginLimiterFloodOfThrowawayKeysCannotResetAVictimOrBlockOthers() {
         MutableClock clock = new MutableClock();
         LoginAttemptLimiter l = new LoginAttemptLimiter(3, Duration.ofMinutes(5), Duration.ofMinutes(10), 100, clock);
         l.recordFailure("victim");
-        l.recordFailure("victim");                  // one attempt left before lockout
-        for (int round = 0; round < 3; round++) {    // flood, also after maintenance may run again
+        l.recordFailure("victim");                       // one attempt left before lockout
+        l.recordFailure("locked");
+        l.recordFailure("locked");
+        l.recordFailure("locked");                       // an active lockout
+        for (int round = 0; round < 3; round++) {         // cheap flood: one failure per throwaway key
             for (int i = 0; i < 1000; i++) {
                 l.recordFailure("flood-" + round + "-" + i);
             }
             assertTrue(l.trackedKeys() <= 100, "cap exceeded: " + l.trackedKeys());
             clock.advance(Duration.ofSeconds(2));
         }
-        assertTrue(l.isSaturated());
-        assertFalse(l.isLocked("victim"), "the victim's own counter is still live, not reset");
+        assertTrue(l.evictionCount() > 0);
+        // Single-failure entries are evicted first, so the victim's two failures survive.
         l.recordFailure("victim");
-        assertTrue(l.isLocked("victim"), "the third failure must still lock: the flood did not reset the counter");
-
-        // Fail closed: while full of live entries, keys the limiter cannot track count as locked.
-        assertTrue(l.isLocked("never-seen-account"));
-        assertEquals(Duration.ofMinutes(5), l.retryAfter("never-seen-account"));
-
-        // Once the window passes, expired entries are removed and new keys work again.
-        clock.advance(Duration.ofMinutes(6));
+        assertTrue(l.isLocked("victim"), "the flood must not reset a counter that holds more failures");
+        assertTrue(l.isLocked("locked"), "the flood must not evict an active lockout");
+        // Nobody else is blocked by the flood.
         assertFalse(l.isLocked("never-seen-account"));
-        assertFalse(l.isSaturated());
-        assertTrue(l.isLocked("victim"), "a live lockout survives maintenance");
+        assertEquals(Duration.ZERO, l.retryAfter("never-seen-account"));
+    }
+
+    @Test
+    void loginLimiterEvictsTheWeakestEntryOldestFirst() {
+        MutableClock clock = new MutableClock();
+        LoginAttemptLimiter l = new LoginAttemptLimiter(5, Duration.ofMinutes(5), Duration.ofMinutes(10), 3, clock);
+        l.recordFailure("a");                            // 1 failure, oldest
+        l.recordFailure("b");                            // 1 failure
+        l.recordFailure("c");
+        l.recordFailure("c");                            // 2 failures
+        l.recordFailure("d");                            // full: evicts "a", the oldest weakest entry
+        for (int i = 0; i < 4; i++) {
+            l.recordFailure("c");                        // reach the lockout only if c was never evicted
+        }
+        assertTrue(l.isLocked("c"));
+        assertEquals(3, l.trackedKeys());
+        assertEquals(1, l.evictionCount());
     }
 
     @Test

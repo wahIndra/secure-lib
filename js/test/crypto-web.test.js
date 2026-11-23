@@ -67,30 +67,39 @@ test('login limiter locks and unlocks', () => {
   assert.equal(l.isLocked('alice'), false);
 });
 
-test('login limiter: a flood cannot reset a counter or disable protection', () => {
+test('login limiter: a flood of throwaway keys cannot reset a victim or block others', () => {
   let now = 0;
   const l = new LoginAttemptLimiter({ maxFailures: 3, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 100, now: () => now });
   l.recordFailure('victim');
   l.recordFailure('victim'); // one attempt left before lockout
-  for (let round = 0; round < 3; round++) {
+  for (let i = 0; i < 3; i++) l.recordFailure('locked'); // an active lockout
+  for (let round = 0; round < 3; round++) { // cheap flood: one failure per throwaway key
     for (let i = 0; i < 1000; i++) l.recordFailure(`flood-${round}-${i}`);
     assert.ok(l.trackedKeys <= 100, `cap exceeded: ${l.trackedKeys}`);
     now += 2000;
   }
-  assert.equal(l.saturated, true);
-  assert.equal(l.isLocked('victim'), false, "the victim's own counter is still live, not reset");
+  assert.ok(l.evictionCount > 0);
+  // Single-failure entries are evicted first, so the victim's two failures survive.
   l.recordFailure('victim');
-  assert.equal(l.isLocked('victim'), true, 'the third failure must still lock: the flood did not reset the counter');
-
-  // Fail closed: while full of live entries, keys the limiter cannot track count as locked.
-  assert.equal(l.isLocked('never-seen-account'), true);
-  assert.equal(l.retryAfterMs('never-seen-account'), 5 * 60_000);
-
-  // Once the window passes, expired entries are removed and new keys work again.
-  now += 6 * 60_000;
+  assert.equal(l.isLocked('victim'), true, 'the flood must not reset a counter that holds more failures');
+  assert.equal(l.isLocked('locked'), true, 'the flood must not evict an active lockout');
+  // Nobody else is blocked by the flood.
   assert.equal(l.isLocked('never-seen-account'), false);
-  assert.equal(l.saturated, false);
-  assert.equal(l.isLocked('victim'), true, 'a live lockout survives maintenance');
+  assert.equal(l.retryAfterMs('never-seen-account'), 0);
+});
+
+test('login limiter evicts the weakest entry, oldest first', () => {
+  let now = 0;
+  const l = new LoginAttemptLimiter({ maxFailures: 5, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 3, now: () => now });
+  l.recordFailure('a'); // 1 failure, oldest
+  l.recordFailure('b'); // 1 failure
+  l.recordFailure('c');
+  l.recordFailure('c'); // 2 failures
+  l.recordFailure('d'); // full: evicts "a", the oldest weakest entry
+  for (let i = 0; i < 4; i++) l.recordFailure('c'); // reaches the lockout only if c was never evicted
+  assert.equal(l.isLocked('c'), true);
+  assert.equal(l.trackedKeys, 3);
+  assert.equal(l.evictionCount, 1);
 });
 
 test('request inspector fails closed on nesting deeper than it inspects', () => {

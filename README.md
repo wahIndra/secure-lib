@@ -500,8 +500,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.12, JDK 21) | 323 passed, 1 skipped\* | 83.4% | 68.8% |
-| JavaScript (`node --experimental-test-coverage`) | 59 passed | 92.6% | 80.2% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 324 passed, 1 skipped\* | 83.2% | 68.9% |
+| JavaScript (`node --experimental-test-coverage`) | 60 passed | 92.5% | 79.4% |
 | Java servlet filter modules | none yet | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
@@ -514,7 +514,7 @@ Developer Mode). The JavaScript equivalent runs and passes.
 |---|---:|---:|
 | `secure` (root) | 90.7% | 83.3% |
 | `.access` | 79.3% | 70.2% |
-| `.crypto` | 82.0% | 69.2% |
+| `.crypto` | 79.7% | 70.8% |
 | `.detect` | 94.9% | 84.9% |
 | `.devtools` (scanner, probe, CLI) | 78.8% | 69.0% |
 | `.errors` | 100.0% | 100.0% |
@@ -634,11 +634,13 @@ Java version first if you want them.
   64 KB each would take roughly 1.7 s to inspect. Keep the container's request-size limits
   (e.g. Tomcat `maxPostSize`, `express.json({ limit })`) in place.
 - `LoginAttemptLimiter` keeps its state in memory. Use a shared store when running multiple instances.
-  It tracks at most `maxTrackedKeys` keys (default 100,000) and never evicts a live counter. If a
-  flood fills it, it **fails closed**: accounts it isn't already tracking are reported as locked
-  until the window passes (default 15 minutes). Brute-force protection stays on, but a large
-  credential-stuffing run can throttle logins for new accounts. Size the cap for your traffic,
-  alert on `isSaturated()` / `saturated`, and add a per-IP limiter in front.
+  It tracks at most `maxTrackedKeys` keys (default 100,000). When full, it drops expired entries,
+  then evicts the entry with the **fewest** live failures (oldest first), and active lockouts
+  last. Unknown accounts are never blocked, so a flood can't lock real users out. To reset a
+  victim holding *k* failures, an attacker must first fill the table with entries holding at
+  least *k* failures each: at least *k* × 100,000 failed attempts to win back *k* guesses, i.e.
+  one extra guess per 100,000 requests. Alert on a rising `evictionCount()` / `evictionCount`,
+  and put a per-IP limiter in front so one source can't produce that volume.
 - The servlet filter modules have no automated tests yet; they have only been compiled.
 - Supply chain (A03) is a build-time concern. Run `mvn org.owasp:dependency-check-maven:check`
   and `npm audit` in CI.

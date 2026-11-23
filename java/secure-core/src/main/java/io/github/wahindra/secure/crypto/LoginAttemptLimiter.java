@@ -2,10 +2,10 @@ package io.github.wahindra.secure.crypto;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In-memory brute-force / credential-stuffing protection. Key by account and, separately, by
@@ -16,20 +16,30 @@ import java.util.concurrent.atomic.AtomicLong;
  * if (ok) limiter.recordSuccess(username); else limiter.recordFailure(username);
  * </pre>
  *
- * <p><b>Capacity.</b> At most {@code maxTrackedKeys} keys are kept. Only entries whose window and
- * lockout have both expired are ever removed; live failure counters are never evicted, because
- * evicting them would let an attacker reset a victim's counter by flooding the limiter with
- * throwaway keys. When the limiter is full of live entries it <b>fails closed</b>: keys it is not
- * already tracking are reported as locked until expired entries free space (at most one window).
- * During such a flood, new accounts are throttled but brute-force protection never switches off.
- * Size {@code maxTrackedKeys} for your traffic and alert on {@link #isSaturated()}.
+ * <p><b>Bounded memory without blocking anyone.</b> At most {@code maxTrackedKeys} keys are kept.
+ * Expired entries are dropped first. If the limiter is still full, it evicts the entry with the
+ * <i>fewest</i> live failures (oldest first), and active lockouts only after every unlocked entry.
+ * Unknown keys are never refused, so a flood of throwaway usernames cannot lock out real users.
+ *
+ * <p>The cost of an attack is what keeps this safe. To evict a victim holding {@code k} failures, an
+ * attacker must first fill the whole table with entries holding at least {@code k} failures each:
+ * at least {@code k * maxTrackedKeys} failed attempts, to win back {@code k} guesses. That is at
+ * most one extra guess per {@code maxTrackedKeys} (default 100,000) attacker requests. Put a
+ * per-IP limiter in front so a single source cannot generate that volume at all.
  */
 public final class LoginAttemptLimiter {
 
     private static final class Entry {
+        final String key;
         int failures;
         long windowStart;
         long lockedUntil;
+        /** Index into {@link #levels}: failures while unlocked, {@code maxFailures} once locked. */
+        int level;
+
+        Entry(String key) {
+            this.key = key;
+        }
     }
 
     private static final long MAINTENANCE_INTERVAL_MS = 1000;
@@ -39,108 +49,117 @@ public final class LoginAttemptLimiter {
     private final long lockMillis;
     private final int maxTrackedKeys;
     private final Clock clock;
-    private final Map<String, Entry> entries = new ConcurrentHashMap<String, Entry>();
-    private final AtomicLong lastMaintenance = new AtomicLong(Long.MIN_VALUE / 2);
+
+    // Guarded by "this". Login checks are rare compared with request handling, so one lock is simpler
+    // and safer than fine-grained concurrency here.
+    private final Map<String, Entry> entries = new HashMap<String, Entry>();
+    /** levels[n] holds entries at that level in the order they reached it (oldest first). */
+    private final LinkedHashMap<String, Entry>[] levels;
+    private long lastMaintenance = Long.MIN_VALUE / 2;
+    private long evictions;
 
     public LoginAttemptLimiter() {
         this(5, Duration.ofMinutes(15), Duration.ofMinutes(15), 100_000, Clock.systemUTC());
     }
 
+    @SuppressWarnings("unchecked")
     public LoginAttemptLimiter(int maxFailures, Duration window, Duration lockout, int maxTrackedKeys, Clock clock) {
+        if (maxFailures < 1 || maxTrackedKeys < 1) {
+            throw new IllegalArgumentException("maxFailures and maxTrackedKeys must be positive");
+        }
         this.maxFailures = maxFailures;
         this.windowMillis = window.toMillis();
         this.lockMillis = lockout.toMillis();
         this.maxTrackedKeys = maxTrackedKeys;
         this.clock = clock;
+        this.levels = new LinkedHashMap[maxFailures + 1];
+        for (int i = 0; i < levels.length; i++) {
+            levels[i] = new LinkedHashMap<String, Entry>();
+        }
     }
 
-    public boolean isLocked(String key) {
-        long now = clock.millis();
+    public synchronized boolean isLocked(String key) {
         Entry e = entries.get(key);
-        if (e == null) {
-            return !hasRoom(now);
-        }
-        synchronized (e) {
-            return e.lockedUntil > now;
-        }
+        return e != null && e.lockedUntil > clock.millis();
     }
 
     /** Remaining lock time, zero if not locked. Use for the Retry-After header. */
-    public Duration retryAfter(String key) {
+    public synchronized Duration retryAfter(String key) {
+        Entry e = entries.get(key);
+        return e == null ? Duration.ZERO : Duration.ofMillis(Math.max(0, e.lockedUntil - clock.millis()));
+    }
+
+    public synchronized void recordFailure(String key) {
         long now = clock.millis();
         Entry e = entries.get(key);
         if (e == null) {
-            return hasRoom(now) ? Duration.ZERO : Duration.ofMillis(windowMillis);
+            if (entries.size() >= maxTrackedKeys) {
+                makeRoom(now);
+            }
+            e = new Entry(key);
+            e.windowStart = now;
+            entries.put(key, e);
         }
-        synchronized (e) {
-            return Duration.ofMillis(Math.max(0, e.lockedUntil - now));
+        if (e.lockedUntil <= now && now - e.windowStart > windowMillis) {
+            e.windowStart = now;
+            e.failures = 0;
         }
+        e.failures++;
+        if (e.failures >= maxFailures) {
+            e.lockedUntil = now + lockMillis;
+            e.failures = 0;
+            e.windowStart = now;
+        }
+        moveTo(e, e.lockedUntil > now ? maxFailures : e.failures);
     }
 
-    public void recordFailure(String key) {
-        long now = clock.millis();
-        Entry e = entries.get(key);
-        if (e == null) {
-            if (!hasRoom(now)) {
-                // Saturated: the key is already reported as locked by isLocked(), so the caller
-                // should not have verified a password for it. Nothing to record.
-                return;
-            }
-            Entry fresh = new Entry();
-            fresh.windowStart = now;
-            e = entries.putIfAbsent(key, fresh);
-            if (e == null) {
-                e = fresh;
-            }
+    public synchronized void recordSuccess(String key) {
+        Entry e = entries.remove(key);
+        if (e != null) {
+            levels[e.level].remove(key);
         }
-        synchronized (e) {
-            if (now - e.windowStart > windowMillis) {
-                e.windowStart = now;
-                e.failures = 0;
-            }
-            e.failures++;
-            if (e.failures >= maxFailures) {
-                e.lockedUntil = now + lockMillis;
-                e.failures = 0;
-                e.windowStart = now;
-            }
-        }
-    }
-
-    public void recordSuccess(String key) {
-        entries.remove(key);
-    }
-
-    /** {@code true} while the limiter is full of live entries and fails closed for new keys. */
-    public boolean isSaturated() {
-        return !hasRoom(clock.millis());
     }
 
     /** Number of keys currently tracked (for monitoring). */
-    public int trackedKeys() {
+    public synchronized int trackedKeys() {
         return entries.size();
     }
 
-    /**
-     * Whether a new key can be tracked. When full, removes expired entries; the scan runs at
-     * most once per {@link #MAINTENANCE_INTERVAL_MS} so a flood of new keys cannot turn every
-     * request into an O(n) scan.
-     */
-    private boolean hasRoom(long now) {
-        if (entries.size() < maxTrackedKeys) {
-            return true;
+    /** Entries evicted to stay under the cap since start. A steady rise means a flood: alert on it. */
+    public synchronized long evictionCount() {
+        return evictions;
+    }
+
+    private void moveTo(Entry e, int level) {
+        if (e.level != level || !levels[level].containsKey(e.key)) {
+            levels[e.level].remove(e.key);
+            e.level = level;
+            levels[level].put(e.key, e);
         }
-        long last = lastMaintenance.get();
-        if (now - last >= MAINTENANCE_INTERVAL_MS && lastMaintenance.compareAndSet(last, now)) {
-            for (Iterator<Map.Entry<String, Entry>> it = entries.entrySet().iterator(); it.hasNext(); ) {
-                Entry e = it.next().getValue();
-                synchronized (e) {
-                    if (e.lockedUntil <= now && now - e.windowStart > windowMillis) {
-                        it.remove();
-                    }
+    }
+
+    private void makeRoom(long now) {
+        // Expired entries cost nothing to drop. The full scan runs at most once per interval so a
+        // flood cannot turn every failed login into an O(n) pass.
+        if (now - lastMaintenance >= MAINTENANCE_INTERVAL_MS) {
+            lastMaintenance = now;
+            for (Iterator<Entry> it = entries.values().iterator(); it.hasNext(); ) {
+                Entry e = it.next();
+                if (e.lockedUntil <= now && now - e.windowStart > windowMillis) {
+                    it.remove();
+                    levels[e.level].remove(e.key);
                 }
             }
         }
-        return entries.size() < maxTrackedKeys;
+        // Still full: evict the weakest entry, i.e. fewest failures, oldest first, lockouts last.
+        for (int level = 0; level < levels.length && entries.size() >= maxTrackedKeys; level++) {
+            Iterator<Entry> it = levels[level].values().iterator();
+            while (it.hasNext() && entries.size() >= maxTrackedKeys) {
+                Entry victim = it.next();
+                it.remove();
+                entries.remove(victim.key);
+                evictions++;
+            }
+        }
     }
 }
