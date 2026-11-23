@@ -127,6 +127,26 @@ class CryptoAndWebTest {
     }
 
     @Test
+    void loginLimiterDropsAnExpiredLockoutBeforeEvictingALiveCounter() {
+        MutableClock clock = new MutableClock();
+        LoginAttemptLimiter l = new LoginAttemptLimiter(3, Duration.ofMinutes(5), Duration.ofMinutes(10), 3, clock);
+        for (int i = 0; i < 3; i++) {
+            l.recordFailure("old-lock");                   // locked until t+10m
+        }
+        clock.advance(Duration.ofMillis(600_000 - 500));  // just before the lockout ends
+        l.recordFailure("live-1");
+        l.recordFailure("live-2");                        // full: old-lock, live-1, live-2
+        l.recordFailure("x");                             // full scan runs now; old-lock is still live, live-1 is evicted
+        assertEquals(1, l.evictionCount());
+        clock.advance(Duration.ofMillis(600));            // old-lock has now expired, but the next full scan is not due yet
+        l.recordFailure("new");
+        assertEquals(1, l.evictionCount(), "the expired lockout is dropped instead of evicting a live counter");
+        l.recordFailure("live-2");
+        l.recordFailure("live-2");
+        assertTrue(l.isLocked("live-2"), "live-2 kept its first failure");
+    }
+
+    @Test
     void tokensAndHmac() {
         assertEquals(43, SecureTokens.urlSafe().length());
         assertTrue(SecureTokens.constantTimeEquals("abc", "abc"));

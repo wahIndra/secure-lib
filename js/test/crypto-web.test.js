@@ -102,6 +102,23 @@ test('login limiter evicts the weakest entry, oldest first', () => {
   assert.equal(l.evictionCount, 1);
 });
 
+test('login limiter drops an expired lockout before evicting a live counter', () => {
+  let now = 0;
+  const l = new LoginAttemptLimiter({ maxFailures: 3, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 3, now: () => now });
+  for (let i = 0; i < 3; i++) l.recordFailure('old-lock'); // locked until t+10m
+  now += 600_000 - 500; // just before the lockout ends
+  l.recordFailure('live-1');
+  l.recordFailure('live-2'); // full: old-lock, live-1, live-2
+  l.recordFailure('x'); // full scan runs now; old-lock is still live, live-1 is evicted
+  assert.equal(l.evictionCount, 1);
+  now += 600; // old-lock has now expired, but the next full scan is not due yet
+  l.recordFailure('new');
+  assert.equal(l.evictionCount, 1, 'the expired lockout is dropped instead of evicting a live counter');
+  l.recordFailure('live-2');
+  l.recordFailure('live-2');
+  assert.equal(l.isLocked('live-2'), true, 'live-2 kept its first failure');
+});
+
 test('request inspector fails closed on nesting deeper than it inspects', () => {
   let deep = { q: "' OR 1=1--" };
   for (let i = 0; i < 15; i++) deep = { a: deep };

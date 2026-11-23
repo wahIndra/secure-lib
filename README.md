@@ -500,8 +500,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 324 passed, 1 skipped\* | 83.2% | 68.9% |
-| JavaScript (`node --experimental-test-coverage`) | 60 passed | 92.5% | 79.4% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 325 passed, 1 skipped\* | 83.2% | 68.9% |
+| JavaScript (`node --experimental-test-coverage`) | 61 passed | 92.5% | 79.4% |
 | Java servlet filter modules | none yet | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
@@ -640,7 +640,8 @@ Java version first if you want them.
   victim holding *k* failures, an attacker must first fill the table with entries holding at
   least *k* failures each: at least *k* × 100,000 failed attempts to win back *k* guesses, i.e.
   one extra guess per 100,000 requests. Alert on a rising `evictionCount()` / `evictionCount`,
-  and put a per-IP limiter in front so one source can't produce that volume.
+  and put a per-IP limiter in front so one source can't produce that volume. Use separate
+  instances for accounts and IPs so flooding one cannot push entries out of the other.
 - The servlet filter modules have no automated tests yet; they have only been compiled.
 - Supply chain (A03) is a build-time concern. Run `mvn org.owasp:dependency-check-maven:check`
   and `npm audit` in CI.

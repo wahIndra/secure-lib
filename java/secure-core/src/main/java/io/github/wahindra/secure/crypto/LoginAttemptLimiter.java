@@ -26,6 +26,13 @@ import java.util.Map;
  * at least {@code k * maxTrackedKeys} failed attempts, to win back {@code k} guesses. That is at
  * most one extra guess per {@code maxTrackedKeys} (default 100,000) attacker requests. Put a
  * per-IP limiter in front so a single source cannot generate that volume at all.
+ *
+ * <p>Use <b>separate instances</b> for accounts and for client IPs, so a flood of one kind of key
+ * cannot push the other kind out.
+ *
+ * <p>Why not refuse new keys when full instead? Then a flood of throwaway usernames would lock out
+ * every account the limiter is not already tracking: a cheap, total login outage. Bounded
+ * eviction costs an attacker far more than it gains, while refusal costs them almost nothing.
  */
 public final class LoginAttemptLimiter {
 
@@ -131,11 +138,15 @@ public final class LoginAttemptLimiter {
     }
 
     private void moveTo(Entry e, int level) {
-        if (e.level != level || !levels[level].containsKey(e.key)) {
-            levels[e.level].remove(e.key);
-            e.level = level;
-            levels[level].put(e.key, e);
-        }
+        // Re-insert on every move and on every new lockout, so each level stays ordered by the
+        // time of its last event and the oldest (first to expire) entry is always at the head.
+        levels[e.level].remove(e.key);
+        e.level = level;
+        levels[level].put(e.key, e);
+    }
+
+    private boolean isStale(Entry e, long now) {
+        return e.lockedUntil <= now && now - e.windowStart > windowMillis;
     }
 
     private void makeRoom(long now) {
@@ -145,13 +156,26 @@ public final class LoginAttemptLimiter {
             lastMaintenance = now;
             for (Iterator<Entry> it = entries.values().iterator(); it.hasNext(); ) {
                 Entry e = it.next();
-                if (e.lockedUntil <= now && now - e.windowStart > windowMillis) {
+                if (isStale(e, now)) {
                     it.remove();
                     levels[e.level].remove(e.key);
                 }
             }
         }
-        // Still full: evict the weakest entry, i.e. fewest failures, oldest first, lockouts last.
+        // Between scans, expired entries can still sit at the head of any level (for example a
+        // lockout that has run out). Drop those from every level before evicting anything live.
+        for (LinkedHashMap<String, Entry> level : levels) {
+            Iterator<Entry> it = level.values().iterator();
+            while (it.hasNext()) {
+                Entry head = it.next();
+                if (!isStale(head, now)) {
+                    break;
+                }
+                it.remove();
+                entries.remove(head.key);
+            }
+        }
+        // Still full: evict the weakest live entry, i.e. fewest failures, oldest first, lockouts last.
         for (int level = 0; level < levels.length && entries.size() >= maxTrackedKeys; level++) {
             Iterator<Entry> it = levels[level].values().iterator();
             while (it.hasNext() && entries.size() >= maxTrackedKeys) {

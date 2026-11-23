@@ -139,6 +139,13 @@ export function validatePassword(password, { username, minLength = 12, maxLength
  * k * maxTrackedKeys failed attempts to win back k guesses. That is at most one extra guess per
  * maxTrackedKeys (default 100,000) attacker requests. Put a per-IP limiter in front so a single
  * source cannot generate that volume at all.
+ *
+ * Use separate instances for accounts and for client IPs, so a flood of one kind of key cannot
+ * push the other kind out.
+ *
+ * Why not refuse new keys when full instead? Then a flood of throwaway usernames would lock out
+ * every account the limiter is not already tracking: a cheap, total login outage. Bounded eviction
+ * costs an attacker far more than it gains, while refusal costs them almost nothing.
  */
 export class LoginAttemptLimiter {
   #entries = new Map();
@@ -203,11 +210,15 @@ export class LoginAttemptLimiter {
   }
 
   #moveTo(e, level) {
-    if (e.level !== level || !this.#levels[level].has(e.key)) {
-      this.#levels[e.level].delete(e.key);
-      e.level = level;
-      this.#levels[level].set(e.key, e);
-    }
+    // Re-insert on every move and on every new lockout, so each level stays ordered by the time
+    // of its last event and the oldest (first to expire) entry is always at the head.
+    this.#levels[e.level].delete(e.key);
+    e.level = level;
+    this.#levels[level].set(e.key, e);
+  }
+
+  #isStale(e, now) {
+    return e.lockedUntil <= now && now - e.windowStart > this.windowMs;
   }
 
   #makeRoom(now) {
@@ -216,13 +227,22 @@ export class LoginAttemptLimiter {
     if (now - this.#lastMaintenance >= MAINTENANCE_INTERVAL_MS) {
       this.#lastMaintenance = now;
       for (const [k, e] of this.#entries) {
-        if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) {
+        if (this.#isStale(e, now)) {
           this.#entries.delete(k);
           this.#levels[e.level].delete(k);
         }
       }
     }
-    // Still full: evict the weakest entry, i.e. fewest failures, oldest first, lockouts last.
+    // Between scans, expired entries can still sit at the head of any level (for example a lockout
+    // that has run out). Drop those from every level before evicting anything live.
+    for (const level of this.#levels) {
+      for (const [k, e] of level) {
+        if (!this.#isStale(e, now)) break;
+        level.delete(k);
+        this.#entries.delete(k);
+      }
+    }
+    // Still full: evict the weakest live entry, i.e. fewest failures, oldest first, lockouts last.
     for (const level of this.#levels) {
       for (const k of level.keys()) {
         if (this.#entries.size < this.maxTrackedKeys) return;
