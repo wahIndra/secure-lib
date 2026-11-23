@@ -206,6 +206,9 @@ export declare class LoginAttemptLimiter {
   retryAfterMs(key: string): number;
   recordFailure(key: string): void;
   recordSuccess(key: string): void;
+  /** True while full of live entries; untracked keys are then reported as locked (fail closed). */
+  readonly saturated: boolean;
+  readonly trackedKeys: number;
 }
 
 export declare function randomToken(bytes?: number): string;

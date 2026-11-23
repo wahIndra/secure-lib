@@ -84,21 +84,32 @@ class CryptoAndWebTest {
     }
 
     @Test
-    void loginLimiterCapIsHardAndLockoutsSurviveAFlood() {
+    void loginLimiterFloodCannotResetACounterOrDisableProtection() {
         MutableClock clock = new MutableClock();
-        LoginAttemptLimiter l = new LoginAttemptLimiter(2, Duration.ofMinutes(5), Duration.ofMinutes(10), 100, clock);
+        LoginAttemptLimiter l = new LoginAttemptLimiter(3, Duration.ofMinutes(5), Duration.ofMinutes(10), 100, clock);
         l.recordFailure("victim");
-        l.recordFailure("victim");
-        assertTrue(l.isLocked("victim"));
-        // Flood with throwaway usernames, also after maintenance becomes possible again.
-        for (int round = 0; round < 3; round++) {
+        l.recordFailure("victim");                  // one attempt left before lockout
+        for (int round = 0; round < 3; round++) {    // flood, also after maintenance may run again
             for (int i = 0; i < 1000; i++) {
                 l.recordFailure("flood-" + round + "-" + i);
             }
             assertTrue(l.trackedKeys() <= 100, "cap exceeded: " + l.trackedKeys());
             clock.advance(Duration.ofSeconds(2));
         }
-        assertTrue(l.isLocked("victim"), "a flood must not evict an active lockout");
+        assertTrue(l.isSaturated());
+        assertFalse(l.isLocked("victim"), "the victim's own counter is still live, not reset");
+        l.recordFailure("victim");
+        assertTrue(l.isLocked("victim"), "the third failure must still lock: the flood did not reset the counter");
+
+        // Fail closed: while full of live entries, keys the limiter cannot track count as locked.
+        assertTrue(l.isLocked("never-seen-account"));
+        assertEquals(Duration.ofMinutes(5), l.retryAfter("never-seen-account"));
+
+        // Once the window passes, expired entries are removed and new keys work again.
+        clock.advance(Duration.ofMinutes(6));
+        assertFalse(l.isLocked("never-seen-account"));
+        assertFalse(l.isSaturated());
+        assertTrue(l.isLocked("victim"), "a live lockout survives maintenance");
     }
 
     @Test

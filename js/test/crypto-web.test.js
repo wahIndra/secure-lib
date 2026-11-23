@@ -67,18 +67,30 @@ test('login limiter locks and unlocks', () => {
   assert.equal(l.isLocked('alice'), false);
 });
 
-test('login limiter cap is hard and lockouts survive a flood', () => {
+test('login limiter: a flood cannot reset a counter or disable protection', () => {
   let now = 0;
-  const l = new LoginAttemptLimiter({ maxFailures: 2, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 100, now: () => now });
+  const l = new LoginAttemptLimiter({ maxFailures: 3, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 100, now: () => now });
   l.recordFailure('victim');
-  l.recordFailure('victim');
-  assert.equal(l.isLocked('victim'), true);
+  l.recordFailure('victim'); // one attempt left before lockout
   for (let round = 0; round < 3; round++) {
     for (let i = 0; i < 1000; i++) l.recordFailure(`flood-${round}-${i}`);
     assert.ok(l.trackedKeys <= 100, `cap exceeded: ${l.trackedKeys}`);
     now += 2000;
   }
-  assert.equal(l.isLocked('victim'), true, 'a flood must not evict an active lockout');
+  assert.equal(l.saturated, true);
+  assert.equal(l.isLocked('victim'), false, "the victim's own counter is still live, not reset");
+  l.recordFailure('victim');
+  assert.equal(l.isLocked('victim'), true, 'the third failure must still lock: the flood did not reset the counter');
+
+  // Fail closed: while full of live entries, keys the limiter cannot track count as locked.
+  assert.equal(l.isLocked('never-seen-account'), true);
+  assert.equal(l.retryAfterMs('never-seen-account'), 5 * 60_000);
+
+  // Once the window passes, expired entries are removed and new keys work again.
+  now += 6 * 60_000;
+  assert.equal(l.isLocked('never-seen-account'), false);
+  assert.equal(l.saturated, false);
+  assert.equal(l.isLocked('victim'), true, 'a live lockout survives maintenance');
 });
 
 test('request inspector fails closed on nesting deeper than it inspects', () => {

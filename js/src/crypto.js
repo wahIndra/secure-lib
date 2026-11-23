@@ -128,6 +128,12 @@ export function validatePassword(password, { username, minLength = 12, maxLength
 /**
  * In-memory brute-force / credential-stuffing protection. Key by account and, separately,
  * by client IP. For multiple instances, back it with a shared store using the same rules.
+ *
+ * Capacity: at most `maxTrackedKeys` keys. Only entries whose window and lockout have both
+ * expired are removed; live counters are never evicted (that would let an attacker reset a
+ * victim's counter by flooding the limiter). When full of live entries it fails closed: keys it
+ * is not already tracking are reported as locked until expired entries free space (at most one
+ * window). Size `maxTrackedKeys` for your traffic and alert on `saturated`.
  */
 export class LoginAttemptLimiter {
   constructor({ maxFailures = 5, windowMs = 15 * 60_000, lockoutMs = 15 * 60_000, maxTrackedKeys = 100_000, now = Date.now } = {}) {
@@ -136,23 +142,26 @@ export class LoginAttemptLimiter {
   }
 
   isLocked(key) {
+    const now = this.now();
     const e = this.entries.get(key);
-    return !!e && e.lockedUntil > this.now();
+    return e ? e.lockedUntil > now : !this.#hasRoom(now);
   }
 
   /** Remaining lock in ms (0 if not locked). Use for the Retry-After header. */
   retryAfterMs(key) {
+    const now = this.now();
     const e = this.entries.get(key);
-    return e ? Math.max(0, e.lockedUntil - this.now()) : 0;
+    if (!e) return this.#hasRoom(now) ? 0 : this.windowMs;
+    return Math.max(0, e.lockedUntil - now);
   }
 
   recordFailure(key) {
     const now = this.now();
     let e = this.entries.get(key);
     if (!e) {
-      // Full of active lockouts: keep the memory cap hard rather than grow. Pair this limiter
-      // with a per-IP one so a flood of usernames is still throttled.
-      if (this.entries.size >= this.maxTrackedKeys && !this.#makeRoom(now)) return;
+      // Saturated: the key is already reported as locked by isLocked(), so the caller should not
+      // have verified a password for it. Nothing to record.
+      if (!this.#hasRoom(now)) return;
       e = { failures: 0, windowStart: now, lockedUntil: 0 };
       this.entries.set(key, e);
     }
@@ -172,27 +181,26 @@ export class LoginAttemptLimiter {
     this.entries.delete(key);
   }
 
+  /** True while the limiter is full of live entries and fails closed for new keys. */
+  get saturated() {
+    return !this.#hasRoom(this.now());
+  }
+
   /** Number of keys currently tracked (for monitoring). */
   get trackedKeys() {
     return this.entries.size;
   }
 
   /**
-   * Frees space when the map is full. Full scans run at most once per second so a flood of new
-   * keys cannot turn every failed login into an O(n) scan. Expired entries go first, then
-   * unlocked ones (oldest first); active lockouts are never evicted, otherwise an attacker could
-   * unlock a victim by flooding the limiter with throwaway usernames.
+   * Whether a new key can be tracked. When full, removes expired entries; the scan runs at most
+   * once per second so a flood of new keys cannot turn every request into an O(n) scan.
    */
-  #makeRoom(now) {
-    if (now - this.#lastMaintenance < MAINTENANCE_INTERVAL_MS) return this.entries.size < this.maxTrackedKeys;
-    this.#lastMaintenance = now;
-    const target = this.maxTrackedKeys - Math.max(1, Math.floor(this.maxTrackedKeys / 10));
-    for (const expiredOnly of [true, false]) {
+  #hasRoom(now) {
+    if (this.entries.size < this.maxTrackedKeys) return true;
+    if (now - this.#lastMaintenance >= MAINTENANCE_INTERVAL_MS) {
+      this.#lastMaintenance = now;
       for (const [k, e] of this.entries) {
-        if (this.entries.size <= target) break;
-        const locked = e.lockedUntil > now;
-        const expired = !locked && now - e.windowStart > this.windowMs;
-        if (expired || (!expiredOnly && !locked)) this.entries.delete(k);
+        if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) this.entries.delete(k);
       }
     }
     return this.entries.size < this.maxTrackedKeys;

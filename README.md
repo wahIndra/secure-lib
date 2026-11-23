@@ -634,6 +634,11 @@ Java version first if you want them.
   64 KB each would take roughly 1.7 s to inspect. Keep the container's request-size limits
   (e.g. Tomcat `maxPostSize`, `express.json({ limit })`) in place.
 - `LoginAttemptLimiter` keeps its state in memory. Use a shared store when running multiple instances.
+  It tracks at most `maxTrackedKeys` keys (default 100,000) and never evicts a live counter. If a
+  flood fills it, it **fails closed**: accounts it isn't already tracking are reported as locked
+  until the window passes (default 15 minutes). Brute-force protection stays on, but a large
+  credential-stuffing run can throttle logins for new accounts. Size the cap for your traffic,
+  alert on `isSaturated()` / `saturated`, and add a per-IP limiter in front.
 - The servlet filter modules have no automated tests yet; they have only been compiled.
 - Supply chain (A03) is a build-time concern. Run `mvn org.owasp:dependency-check-maven:check`
   and `npm audit` in CI.
