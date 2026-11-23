@@ -27,12 +27,19 @@ export class HttpRequestInspector {
     const entries = [];
     let count = 0;
     let tooMany = false;
+    let tooDeep = false;
     const add = (location, value) => {
       const r = this.inspector.inspect(value);
       if (r.suspicious) entries.push({ location, result: r });
     };
     const walk = (prefix, value, depth) => {
-      if (value == null || depth > MAX_DEPTH) return;
+      if (value == null) return;
+      // Fail closed: content below the depth limit is not inspected, so the request is rejected
+      // rather than letting a payload hide in deep nesting.
+      if (depth > MAX_DEPTH) {
+        tooDeep = true;
+        return;
+      }
       if (++count > MAX_PARAMETERS) {
         tooMany = true;
         return;
@@ -61,10 +68,10 @@ export class HttpRequestInspector {
     const findings = entries.flatMap((e) => e.result.findings);
     return {
       // Each location is scored on its own, so harmless MEDIUM hits in different fields do not add up.
-      malicious: tooMany || entries.some((e) => e.result.malicious),
-      suspicious: tooMany || entries.length > 0,
+      malicious: tooMany || tooDeep || entries.some((e) => e.result.malicious),
+      suspicious: tooMany || tooDeep || entries.length > 0,
       findings: result(findings).findings,
-      summary: [tooMany ? 'too-many-parameters' : null, ...entries.map((e) => `${e.location}=[${e.result.findings.map((f) => `${f.ruleId}[${f.severity}]`).join(', ')}]`)]
+      summary: [tooMany ? 'too-many-parameters' : null, tooDeep ? 'nesting-too-deep' : null, ...entries.map((e) => `${e.location}=[${e.result.findings.map((f) => `${f.ruleId}[${f.severity}]`).join(', ')}]`)]
         .filter(Boolean)
         .join(', '),
     };

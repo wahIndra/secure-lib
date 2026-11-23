@@ -103,10 +103,21 @@ export function canonicalizePath(rawPath) {
   const out = [];
   for (const seg of decoded.split(/\/+/)) {
     if (!seg) continue;
-    if (seg.replace(/\./g, '').trim() === '') return null;
+    if (!isUnambiguousSegment(seg)) return null;
     out.push(seg);
   }
   return `/${out.join('/')}`;
+}
+
+/**
+ * Rejects segments that some servers rewrite before routing, so the policy and the router cannot
+ * disagree: dot-only segments, leading/trailing whitespace ("admin " or "%20admin"), trailing
+ * dots ("admin." is "admin" on Windows/IIS), and control or invisible (format) characters.
+ */
+function isUnambiguousSegment(seg) {
+  if (seg.replace(/\./g, '') === '' || seg.endsWith('.')) return false;
+  if (/^[\s\p{Zs}]|[\s\p{Zs}]$/u.test(seg)) return false;
+  return !/[\p{Cc}\p{Cf}]/u.test(seg);
 }
 
 const segments = (p) => p.split(/\/+/).filter(Boolean);

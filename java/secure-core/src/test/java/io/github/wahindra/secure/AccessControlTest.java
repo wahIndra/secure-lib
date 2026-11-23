@@ -51,7 +51,10 @@ class AccessControlTest {
     @ValueSource(strings = {
             "/public/../admin/users", "/public/%2e%2e/admin/users", "//admin/users", "/ADMIN/users",
             "/Admin/users/", "/admin;jsessionid=x/users", "/public/..;/admin/users", "/%61dmin/users",
-            "/public%2f..%2fadmin/users", "/public\\..\\admin/users", "/admin/users%00.png", "/public/%252e%252e/admin"
+            "/public%2f..%2fadmin/users", "/public\\..\\admin/users", "/admin/users%00.png", "/public/%252e%252e/admin",
+            // Segments some servers normalize before routing (trailing dot/space, invisible characters):
+            "/admin./users", "/admin%20/users", "/%20admin/users", "/admin%09/users", "/ad%E2%80%8Bmin/users",
+            "/public/../admin.", "/admin%C2%A0/users"
     })
     void bypassAttemptsDoNotReachAdmin(String path) {
         assertFalse(policy.evaluate("GET", path, alice).isAllowed(), path);
@@ -62,6 +65,10 @@ class AccessControlTest {
         assertEquals("/a/b", RouteAccessPolicy.canonicalize("//a///b/?x=1"));
         assertEquals("/", RouteAccessPolicy.canonicalize(""));
         assertNull(RouteAccessPolicy.canonicalize("/a/../b"));
+        assertNull(RouteAccessPolicy.canonicalize("/admin./users"));
+        assertNull(RouteAccessPolicy.canonicalize("/admin%20/users"));
+        assertEquals("/files/report.v1.pdf", RouteAccessPolicy.canonicalize("/files/report.v1.pdf"));
+        assertEquals("/search/new york", RouteAccessPolicy.canonicalize("/search/new%20york"));
     }
 
     @Test

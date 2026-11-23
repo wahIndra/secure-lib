@@ -133,12 +133,32 @@ public final class RouteAccessPolicy {
             if (seg.isEmpty()) {
                 continue;
             }
-            if (seg.equals(".") || seg.equals("..") || seg.trim().isEmpty() || seg.replace(".", "").trim().isEmpty()) {
+            if (!isUnambiguousSegment(seg)) {
                 return null;
             }
             out.append('/').append(seg);
         }
         return out.length() == 0 ? "/" : out.toString();
+    }
+
+    /**
+     * Rejects segments that some servers rewrite before routing, so the policy and the router
+     * cannot disagree: dot-only segments, leading/trailing whitespace ("admin " or "%20admin"),
+     * trailing dots ("admin." is "admin" on Windows/IIS), and control or invisible characters.
+     */
+    private static boolean isUnambiguousSegment(String seg) {
+        if (seg.replace(".", "").isEmpty() || seg.endsWith(".")) {
+            return false;
+        }
+        for (int i = 0; i < seg.length(); i++) {
+            char c = seg.charAt(i);
+            boolean edge = i == 0 || i == seg.length() - 1;
+            if (Character.isISOControl(c) || (edge && (Character.isWhitespace(c) || Character.isSpaceChar(c)))
+                    || Character.getType(c) == Character.FORMAT) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String[] segments(String path) {

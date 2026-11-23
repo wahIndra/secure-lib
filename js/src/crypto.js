@@ -148,9 +148,11 @@ export class LoginAttemptLimiter {
 
   recordFailure(key) {
     const now = this.now();
-    if (this.entries.size >= this.maxTrackedKeys) this.#purge(now);
     let e = this.entries.get(key);
     if (!e) {
+      // Full of active lockouts: keep the memory cap hard rather than grow. Pair this limiter
+      // with a per-IP one so a flood of usernames is still throttled.
+      if (this.entries.size >= this.maxTrackedKeys && !this.#makeRoom(now)) return;
       e = { failures: 0, windowStart: now, lockedUntil: 0 };
       this.entries.set(key, e);
     }
@@ -170,9 +172,33 @@ export class LoginAttemptLimiter {
     this.entries.delete(key);
   }
 
-  #purge(now) {
-    for (const [k, e] of this.entries) {
-      if (e.lockedUntil <= now && now - e.windowStart > this.windowMs) this.entries.delete(k);
-    }
+  /** Number of keys currently tracked (for monitoring). */
+  get trackedKeys() {
+    return this.entries.size;
   }
+
+  /**
+   * Frees space when the map is full. Full scans run at most once per second so a flood of new
+   * keys cannot turn every failed login into an O(n) scan. Expired entries go first, then
+   * unlocked ones (oldest first); active lockouts are never evicted, otherwise an attacker could
+   * unlock a victim by flooding the limiter with throwaway usernames.
+   */
+  #makeRoom(now) {
+    if (now - this.#lastMaintenance < MAINTENANCE_INTERVAL_MS) return this.entries.size < this.maxTrackedKeys;
+    this.#lastMaintenance = now;
+    const target = this.maxTrackedKeys - Math.max(1, Math.floor(this.maxTrackedKeys / 10));
+    for (const expiredOnly of [true, false]) {
+      for (const [k, e] of this.entries) {
+        if (this.entries.size <= target) break;
+        const locked = e.lockedUntil > now;
+        const expired = !locked && now - e.windowStart > this.windowMs;
+        if (expired || (!expiredOnly && !locked)) this.entries.delete(k);
+      }
+    }
+    return this.entries.size < this.maxTrackedKeys;
+  }
+
+  #lastMaintenance = -Infinity;
 }
+
+const MAINTENANCE_INTERVAL_MS = 1000;

@@ -67,6 +67,29 @@ test('login limiter locks and unlocks', () => {
   assert.equal(l.isLocked('alice'), false);
 });
 
+test('login limiter cap is hard and lockouts survive a flood', () => {
+  let now = 0;
+  const l = new LoginAttemptLimiter({ maxFailures: 2, windowMs: 5 * 60_000, lockoutMs: 10 * 60_000, maxTrackedKeys: 100, now: () => now });
+  l.recordFailure('victim');
+  l.recordFailure('victim');
+  assert.equal(l.isLocked('victim'), true);
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < 1000; i++) l.recordFailure(`flood-${round}-${i}`);
+    assert.ok(l.trackedKeys <= 100, `cap exceeded: ${l.trackedKeys}`);
+    now += 2000;
+  }
+  assert.equal(l.isLocked('victim'), true, 'a flood must not evict an active lockout');
+});
+
+test('request inspector fails closed on nesting deeper than it inspects', () => {
+  let deep = { q: "' OR 1=1--" };
+  for (let i = 0; i < 15; i++) deep = { a: deep };
+  const r = new HttpRequestInspector().inspect({ body: deep });
+  assert.equal(r.malicious, true);
+  assert.match(r.summary, /nesting-too-deep/);
+  assert.equal(new HttpRequestInspector().inspect({ body: { a: { b: { c: 'hello' } } } }).malicious, false);
+});
+
 test('tokens, HMAC and CSRF', () => {
   assert.equal(randomToken().length, 43);
   assert.equal(constantTimeEquals('abc', 'abc'), true);

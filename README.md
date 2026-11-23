@@ -500,8 +500,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.12, JDK 21) | 315 passed, 1 skipped\* | 82.7% | 67.9% |
-| JavaScript (`node --experimental-test-coverage`) | 57 passed | 92.3% | 78.8% |
+| Java `secure-core` (JaCoCo 0.8.12, JDK 21) | 323 passed, 1 skipped\* | 83.4% | 68.8% |
+| JavaScript (`node --experimental-test-coverage`) | 59 passed | 92.6% | 80.2% |
 | Java servlet filter modules | none yet | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
@@ -513,8 +513,8 @@ Developer Mode). The JavaScript equivalent runs and passes.
 | Package | Lines | Branches |
 |---|---:|---:|
 | `secure` (root) | 90.7% | 83.3% |
-| `.access` | 78.3% | 66.2% |
-| `.crypto` | 74.1% | 61.5% |
+| `.access` | 79.3% | 70.2% |
+| `.crypto` | 82.0% | 69.2% |
 | `.detect` | 94.9% | 84.9% |
 | `.devtools` (scanner, probe, CLI) | 78.8% | 69.0% |
 | `.errors` | 100.0% | 100.0% |

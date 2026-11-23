@@ -79,11 +79,17 @@ test('route policy: bypass attempts never reach /admin', () => {
     '/public/../admin/users', '/public/%2e%2e/admin/users', '//admin/users', '/ADMIN/users', '/Admin/users/',
     '/admin;jsessionid=x/users', '/public/..;/admin/users', '/%61dmin/users', '/public%2f..%2fadmin/users',
     '/public\\..\\admin/users', '/admin/users%00.png', '/public/%252e%252e/admin',
+    // Segments some servers normalize before routing (trailing dot/space, invisible characters):
+    '/admin./users', '/admin%20/users', '/%20admin/users', '/admin%09/users', '/ad%E2%80%8Bmin/users',
+    '/public/../admin.', '/admin%C2%A0/users',
   ]) {
     assert.equal(policy.evaluate('GET', p, alice).allowed, false, p);
   }
   assert.equal(canonicalizePath('//a///b/?x=1'), '/a/b');
   assert.equal(canonicalizePath('/a/../b'), null);
+  assert.equal(canonicalizePath('/admin./users'), null);
+  assert.equal(canonicalizePath('/files/report.v1.pdf'), '/files/report.v1.pdf');
+  assert.equal(canonicalizePath('/search/new%20york'), '/search/new york');
 });
 
 test('object-level access checks', () => {

@@ -84,6 +84,24 @@ class CryptoAndWebTest {
     }
 
     @Test
+    void loginLimiterCapIsHardAndLockoutsSurviveAFlood() {
+        MutableClock clock = new MutableClock();
+        LoginAttemptLimiter l = new LoginAttemptLimiter(2, Duration.ofMinutes(5), Duration.ofMinutes(10), 100, clock);
+        l.recordFailure("victim");
+        l.recordFailure("victim");
+        assertTrue(l.isLocked("victim"));
+        // Flood with throwaway usernames, also after maintenance becomes possible again.
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 1000; i++) {
+                l.recordFailure("flood-" + round + "-" + i);
+            }
+            assertTrue(l.trackedKeys() <= 100, "cap exceeded: " + l.trackedKeys());
+            clock.advance(Duration.ofSeconds(2));
+        }
+        assertTrue(l.isLocked("victim"), "a flood must not evict an active lockout");
+    }
+
+    @Test
     void tokensAndHmac() {
         assertEquals(43, SecureTokens.urlSafe().length());
         assertTrue(SecureTokens.constantTimeEquals("abc", "abc"));
