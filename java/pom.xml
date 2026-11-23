@@ -57,7 +57,7 @@
     <!-- Bytecode target is Java 8 so one jar runs on 8, 11, 17, 21, 25. -->
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
-    <junit.version>5.10.2</junit.version>
+    <junit.version>5.14.4</junit.version>
   </properties>
 
   <dependencyManagement>
