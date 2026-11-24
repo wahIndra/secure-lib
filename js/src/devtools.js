@@ -336,7 +336,17 @@ export async function checkTargetAllowed({ url, body, headers = {}, allowRemote 
   if (!url.includes('FUZZ') && !(body ?? '').includes('FUZZ') && !Object.values(headers).some((v) => String(v).includes('FUZZ'))) {
     throw new Error('put FUZZ where the payload should go (URL, --data or --header)');
   }
-  const u = new URL(url.replaceAll('FUZZ', '1'));
+  await checkHostAllowed(url.replaceAll('FUZZ', '1'), allowRemote);
+}
+
+/** Refuses non-http(s) URLs, and hosts outside loopback/private networks unless allowRemote. */
+export async function checkHostAllowed(url, allowRemote = false) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new Error(`not a valid URL: ${url}`);
+  }
   if (!/^https?:$/.test(u.protocol)) throw new Error('target must be an http(s) URL');
   if (allowRemote) return;
   const host = u.hostname.replace(/^\[|\]$/g, '');
@@ -451,5 +461,59 @@ export async function probe(target, onResult = () => {}) {
     results.push(res);
     onResult(res, { baseline: b1, baseMillis });
   }
+  return results;
+}
+
+// ---------------------------------------------------------------- IDOR / BOLA check
+
+/**
+ * Manual broken-object-level-authorization (IDOR / BOLA) check: requests one object as its owner,
+ * then as a different user and with no credentials, and reports when anyone but the owner gets it.
+ * Credentials are plain headers, so it works with any login: bearer tokens from any OIDC provider,
+ * session cookies, or API keys. Only local/private targets unless allowRemote is set.
+ *
+ * @param {{url: string, owner: object, other: object, method?: string, body?: string, marker?: string,
+ *          anonymous?: boolean, allowRemote?: boolean, timeoutMs?: number}} target
+ */
+export async function idorProbe({ url, owner = {}, other = {}, method = 'GET', body, marker, anonymous = true, allowRemote = false, timeoutMs = 15000 }) {
+  if (!Object.keys(owner).length || !Object.keys(other).length) {
+    throw new Error("give the owner's and another user's credentials (--as-owner / --as-other)");
+  }
+  await checkHostAllowed(url, allowRemote);
+  const request = async (headers) => {
+    try {
+      const h = { 'user-agent': 'secure-idor/0.1', ...headers };
+      if (body != null && !Object.keys(h).some((k) => k.toLowerCase() === 'content-type')) {
+        h['content-type'] = body.trim().startsWith('{') ? 'application/json' : 'application/x-www-form-urlencoded';
+      }
+      const res = await fetch(url, { method, headers: h, body, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+      return { status: res.status, body: (await res.text()).slice(0, 2 * 1024 * 1024), error: null };
+    } catch (e) {
+      return { status: 0, body: '', error: `${e.name}: ${e.message}` };
+    }
+  };
+  const ownerRes = await request(owner);
+  if (ownerRes.error || ownerRes.status < 200 || ownerRes.status >= 300) {
+    throw new Error(`the owner's request did not succeed (${ownerRes.error ?? `HTTP ${ownerRes.status}`}); check the URL and the owner's credentials first`);
+  }
+  if (marker != null && !ownerRes.body.includes(marker)) {
+    throw new Error("the owner's response does not contain the marker text; pick text that is in it");
+  }
+  const judge = (as, r) => {
+    const result = (severity, verdict) => ({ as, status: r.status, severity, verdict, vulnerable: severity != null });
+    if (r.error) return result(null, `request failed: ${r.error}`);
+    if ([401, 403, 404].includes(r.status)) return result(null, `refused (HTTP ${r.status}), as expected`);
+    if (r.status >= 300 && r.status < 400) return result(null, `redirected (HTTP ${r.status}), probably to a login page`);
+    if (r.status < 200 || r.status >= 300) return result('LOW', `unexpected HTTP ${r.status}; check the server log`);
+    const leaked = marker != null ? r.body.includes(marker) : r.body === ownerRes.body;
+    if (leaked) {
+      return result('HIGH', `${marker != null ? "response contains the owner's marker" : 'same response as the owner'}: broken object level authorization (IDOR). Check ownership with AccessGuard, or query by owner id from the token`);
+    }
+    if (marker != null) return result(null, `HTTP ${r.status} without the owner's data (probably this user's own data)`);
+    return result('MEDIUM', `HTTP ${r.status} with a different body; check by hand, or rerun with --marker set to text only the owner's data contains`);
+  };
+  const results = [{ as: 'owner', status: ownerRes.status, severity: null, verdict: 'allowed, as expected', vulnerable: false }];
+  results.push(judge('other user', await request(other)));
+  if (anonymous) results.push(judge('no credentials', await request({})));
   return results;
 }

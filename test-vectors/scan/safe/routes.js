@@ -6,6 +6,11 @@ const uploads = PathTraversalGuard.forBaseDirectory('/srv/uploads');
 const pattern = /select .* from/i;
 const m = pattern.exec(text);
 
+app.get('/api/orders', async (req, res) => {
+  const user = principalFromVerifiedClaims(req.auth, ClaimMappings.keycloak({ clientId: 'orders-api' }));
+  res.json(await Order.find({ ownerId: user.id }));
+});
+
 app.get('/orders/:id', async (req, res) => {
   const rows = await db.query('SELECT * FROM orders WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]);
   const tagged = await sql`SELECT * FROM orders WHERE id = ${req.params.id}`;

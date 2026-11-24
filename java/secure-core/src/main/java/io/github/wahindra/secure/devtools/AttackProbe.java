@@ -137,11 +137,21 @@ public final class AttackProbe {
         if (!t.url.contains("FUZZ") && (t.body == null || !t.body.contains("FUZZ")) && !t.headers.toString().contains("FUZZ")) {
             throw new IllegalArgumentException("put FUZZ where the payload should go (URL, --data or --header)");
         }
-        URI uri = URI.create(t.url.replace("FUZZ", "1"));
+        checkHostAllowed(t.url.replace("FUZZ", "1"), t.allowRemote);
+    }
+
+    /** Refuses non-http(s) URLs, and hosts outside loopback/private networks unless {@code allowRemote}. */
+    static void checkHostAllowed(String url, boolean allowRemote) throws IOException {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("not a valid URL: " + url);
+        }
         if (uri.getHost() == null || !("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))) {
             throw new IllegalArgumentException("target must be an http(s) URL");
         }
-        if (t.allowRemote) {
+        if (allowRemote) {
             return;
         }
         for (InetAddress a : InetAddress.getAllByName(uri.getHost())) {

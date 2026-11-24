@@ -200,3 +200,86 @@ export class RouteAccessPolicy {
     if (!d.allowed) throw new AccessDeniedError(d.reason, d.unauthenticated);
   }
 }
+
+// ---------------------------------------------------------------- identity from verified tokens
+
+const DEFAULT_MAPPING = Object.freeze({
+  idClaim: 'sub',
+  roleClaims: Object.freeze(['roles', 'groups']),
+  permissionClaims: Object.freeze(['scope', 'scp', 'permissions']),
+  tenantClaim: null,
+});
+
+const mapping = (overrides) => Object.freeze({ ...DEFAULT_MAPPING, ...overrides });
+const required = (value, name) => {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${name} is required`);
+  return value;
+};
+
+/**
+ * Where an identity provider puts the user id, roles, permissions and tenant. Use a preset or
+ * `ClaimMappings.custom({...})`. Claim paths are dot-separated (`realm_access.roles`); a claim
+ * whose name contains dots, such as Auth0's `https://example.com/roles`, is matched whole first.
+ */
+export const ClaimMappings = Object.freeze({
+  /** Standard OIDC: `sub`; roles in `roles`/`groups`; `scope`/`scp`/`permissions`. */
+  standard: () => DEFAULT_MAPPING,
+  /** Keycloak realm roles, plus the roles of `clientId` when given. */
+  keycloak: ({ clientId, tenantClaim = null } = {}) =>
+    mapping({
+      roleClaims: clientId ? ['realm_access.roles', `resource_access.${required(clientId, 'clientId')}.roles`] : ['realm_access.roles'],
+      permissionClaims: ['scope'],
+      tenantClaim,
+    }),
+  /** Auth0: roles in a namespaced custom claim (added by an Auth0 Action), RBAC permissions in `permissions`. */
+  auth0: ({ rolesClaim, tenantClaim = null } = {}) =>
+    mapping({ roleClaims: [required(rolesClaim, 'rolesClaim')], permissionClaims: ['permissions', 'scope'], tenantClaim }),
+  /** Microsoft Entra ID: id `oid` (same for every app, unlike `sub`), app roles `roles`, scopes `scp`, tenant `tid`. */
+  entraId: () => mapping({ idClaim: 'oid', roleClaims: ['roles'], permissionClaims: ['scp'], tenantClaim: 'tid' }),
+  /** Okta: `groups` (add the groups claim to the authorization server), scopes `scp`. */
+  okta: ({ tenantClaim = null } = {}) => mapping({ roleClaims: ['groups'], permissionClaims: ['scp'], tenantClaim }),
+  /** AWS Cognito user pools: `cognito:groups`, scopes `scope`. */
+  cognito: ({ tenantClaim = null } = {}) => mapping({ roleClaims: ['cognito:groups'], permissionClaims: ['scope'], tenantClaim }),
+  /** Any other issuer. Unset fields keep the standard defaults. */
+  custom: (fields = {}) => mapping(fields),
+});
+
+/** Looks up a claim by whole name first, then by dot path through nested objects. */
+export function getClaim(claims, path) {
+  if (claims == null || path == null) return undefined;
+  if (Object.hasOwn(claims, path)) return claims[path];
+  let current = claims;
+  for (const part of path.split('.')) {
+    if (current == null || typeof current !== 'object' || Array.isArray(current) || !Object.hasOwn(current, part)) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function collect(value, out) {
+  if (value == null) return;
+  if (Array.isArray(value)) value.forEach((v) => collect(v, out));
+  else if (typeof value === 'string') value.split(/[\s,]+/).filter(Boolean).forEach((s) => out.add(s));
+}
+
+/**
+ * The caller, built from the claims of an ALREADY VERIFIED access token (for example the payload
+ * returned by `jose`'s `jwtVerify`, or `req.auth` from express-oauth2-jwt-bearer), so identity comes
+ * from the identity provider and never from the request. This function does not verify tokens.
+ *
+ * @returns {{ id: string, roles: Set<string>, permissions: Set<string>, tenantId: string|null, claims: object }}
+ * @throws {AccessDeniedError} (unauthenticated) when the id claim is missing
+ */
+export function principalFromVerifiedClaims(claims, claimMapping = DEFAULT_MAPPING) {
+  if (claims == null || typeof claims !== 'object') throw new AccessDeniedError('no verified token', true);
+  const rawId = getClaim(claims, claimMapping.idClaim);
+  const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId).trim() : '';
+  if (!id) throw new AccessDeniedError(`token has no '${claimMapping.idClaim}' claim`, true);
+  const roles = new Set();
+  for (const p of claimMapping.roleClaims) collect(getClaim(claims, p), roles);
+  const permissions = new Set();
+  for (const p of claimMapping.permissionClaims) collect(getClaim(claims, p), permissions);
+  const t = claimMapping.tenantClaim ? getClaim(claims, claimMapping.tenantClaim) : null;
+  const tenantId = typeof t === 'string' || typeof t === 'number' ? String(t) : null;
+  return Object.freeze({ id, roles, permissions, tenantId, claims: Object.freeze({ ...claims }) });
+}

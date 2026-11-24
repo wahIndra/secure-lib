@@ -153,6 +153,37 @@ export declare class RouteAccessPolicy {
   check(method: string, rawPath: string, principal: Principal | null | undefined): void;
 }
 
+// ---------------------------------------------------------------- identity from verified tokens
+
+export interface ClaimMapping {
+  readonly idClaim: string;
+  readonly roleClaims: readonly string[];
+  readonly permissionClaims: readonly string[];
+  readonly tenantClaim: string | null;
+}
+
+export declare const ClaimMappings: Readonly<{
+  standard(): ClaimMapping;
+  keycloak(options?: { clientId?: string; tenantClaim?: string | null }): ClaimMapping;
+  auth0(options: { rolesClaim: string; tenantClaim?: string | null }): ClaimMapping;
+  entraId(): ClaimMapping;
+  okta(options?: { tenantClaim?: string | null }): ClaimMapping;
+  cognito(options?: { tenantClaim?: string | null }): ClaimMapping;
+  custom(fields?: Partial<ClaimMapping>): ClaimMapping;
+}>;
+
+export interface VerifiedPrincipal extends Principal {
+  readonly id: string;
+  readonly roles: Set<string>;
+  readonly permissions: Set<string>;
+  readonly tenantId: string | null;
+  readonly claims: Readonly<Record<string, unknown>>;
+}
+
+/** Build the caller from the claims of an ALREADY VERIFIED token. Does not verify tokens. */
+export declare function principalFromVerifiedClaims(claims: Record<string, unknown>, mapping?: ClaimMapping): VerifiedPrincipal;
+export declare function getClaim(claims: Record<string, unknown> | null | undefined, path: string): unknown;
+
 // ---------------------------------------------------------------- SSRF
 
 export declare class SsrfError extends SecurityViolationError {}

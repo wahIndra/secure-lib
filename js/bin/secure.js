@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // secure: developer tools for @wahindra/secure. Run `secure help` for usage.
 import fs from 'node:fs';
-import { SourceScanner, DEFAULT_EXCLUDED_DIRS, defaultRules, atLeast, toText, toJson, toSarif, explain, probe } from '../src/devtools.js';
+import { SourceScanner, DEFAULT_EXCLUDED_DIRS, defaultRules, atLeast, toText, toJson, toSarif, explain, probe, idorProbe } from '../src/devtools.js';
 
 const USAGE = `secure: developer tools for the secure library
 
@@ -19,6 +19,13 @@ const USAGE = `secure: developer tools for the secure library
       --only sqli,xss,path,cmd,ssti    limit the checks
       --baseline VALUE                 benign value for the baseline request (default 1)
       --timeout SECONDS                per request (default 15)
+      --allow-remote                   allow non-local targets you are authorized to test
+  idor <object-url>         Check that only the owner can fetch an object (IDOR / BOLA)
+      --as-owner 'Header: value'       credentials of the object's owner (any login: bearer, cookie, API key)
+      --as-other 'Header: value'       credentials of a different ordinary user
+      --marker TEXT                    text only the owner's data contains, for an exact verdict
+      -X, --method / -d, --data        as for probe
+      --no-anonymous                   skip the request without credentials
       --allow-remote                   allow non-local targets you are authorized to test
   rules                     List the scan rules
 
@@ -119,6 +126,36 @@ async function probeCmd(args) {
   return high + medium ? 1 : 0;
 }
 
+async function idorCmd(args) {
+  const t = { owner: {}, other: {} };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!t.url && !a.startsWith('-')) {
+      t.url = a;
+      continue;
+    }
+    if (!t.url) throw new UsageError('the object URL must come first');
+    if (a === '--as-owner' || a === '--as-other') {
+      const h = value(args, ++i, a);
+      const colon = h.indexOf(':');
+      if (colon <= 0) throw new UsageError(`${a} expects 'Header-Name: value'`);
+      t[a === '--as-owner' ? 'owner' : 'other'][h.slice(0, colon).trim()] = h.slice(colon + 1).trim();
+    } else if (a === '--method' || a === '-X') t.method = value(args, ++i, a).toUpperCase();
+    else if (a === '--data' || a === '-d') t.body = value(args, ++i, a);
+    else if (a === '--marker') t.marker = value(args, ++i, a);
+    else if (a === '--no-anonymous') t.anonymous = false;
+    else if (a === '--allow-remote') t.allowRemote = true;
+    else if (a === '--timeout') t.timeoutMs = Number(value(args, ++i, a)) * 1000;
+    else throw new UsageError(`unknown option ${a}`);
+  }
+  if (!t.url) throw new UsageError("usage: idor <object-url> --as-owner 'Header: value' --as-other 'Header: value'");
+  const results = await idorProbe(t);
+  for (const r of results) {
+    console.log(`${(r.severity ?? 'ok').padEnd(7)} ${r.as.padEnd(15)} HTTP ${String(r.status).padStart(3)}  ${r.verdict}`);
+  }
+  return results.some((r) => r.severity === 'HIGH' || r.severity === 'MEDIUM') ? 1 : 0;
+}
+
 async function main(argv) {
   const [cmd, ...rest] = argv;
   if (!cmd || ['help', '--help', '-h'].includes(cmd)) {
@@ -128,6 +165,7 @@ async function main(argv) {
   if (cmd === 'scan') return scan(rest);
   if (cmd === 'check') return check(rest);
   if (cmd === 'probe') return probeCmd(rest);
+  if (cmd === 'idor') return idorCmd(rest);
   if (cmd === 'rules') {
     for (const r of defaultRules()) {
       console.log(`${r.id.padEnd(28)} ${r.severity.padEnd(6)} ${r.owasp.id2025.padEnd(9)} ${[...r.langs].join(',').padEnd(22)} ${r.message}`);

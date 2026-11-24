@@ -7,7 +7,7 @@ shown for teams with older reports.
 
 | 2025 | 2021 | Category | Java (`io.github.wahindra.secure.*`) | JavaScript (`@wahindra/secure`) |
 |---|---|---|---|---|
-| A01 | A01 | Broken Access Control | `access.RouteAccessPolicy` (deny-by-default, path canonicalization), `access.AccessGuard` (owner/IDOR, tenant, roles, mass assignment), `path.PathTraversalGuard`, `path.SafeFileName`, `path.PathTraversalDetector`, `web.CsrfTokenService` | `RouteAccessPolicy`, `AccessGuard` (also blocks `__proto__` pollution), `PathTraversalGuard`, `SafeFileName`, `pathTraversalDetector`, `CsrfTokenService`, `routePolicy()`, `csrfProtection()` |
+| A01 | A01 | Broken Access Control | `access.RouteAccessPolicy` (deny-by-default, path canonicalization), `access.AccessGuard` (owner/IDOR, tenant, roles, mass assignment), `access.ClaimsPrincipal` + `access.ClaimMapping` (identity from verified tokens: Keycloak, Auth0, Entra ID, Okta, Cognito, any OIDC), `secure idor`, `path.PathTraversalGuard`, `path.SafeFileName`, `path.PathTraversalDetector`, `web.CsrfTokenService` | `RouteAccessPolicy`, `AccessGuard` (also blocks `__proto__` pollution), `principalFromVerifiedClaims` + `ClaimMappings`, `secure idor`, `PathTraversalGuard`, `SafeFileName`, `pathTraversalDetector`, `CsrfTokenService`, `routePolicy()`, `csrfProtection()` |
 | A01 | A10 | SSRF (merged into A01 in 2025) | `ssrf.UrlGuard` | `UrlGuard`, `isBlockedAddress` |
 | A02 | A05 | Security Misconfiguration | `web.SecurityHeaders`, servlet `SecurityFilter` | `securityHeaders()`, `LEAKY_HEADERS`, `securityMiddleware()` |
 | A03 | A06 | Software Supply Chain Failures | not a runtime concern; zero dependencies; run Dependency-Check / `npm audit` in CI | same |

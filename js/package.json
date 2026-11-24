@@ -59,6 +59,7 @@
     "coverage": "node --test --experimental-test-coverage",
     "bench": "node bench/bench.js",
     "prepack": "node -e \"require('fs').cpSync('../devtools','devtools',{recursive:true})\"",
+    "postpack": "node -e \"require('fs').rmSync('devtools',{recursive:true,force:true})\"",
     "scan": "node bin/secure.js scan"
   }
 }

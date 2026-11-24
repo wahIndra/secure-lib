@@ -44,6 +44,8 @@ app.get('/go', (req, res) => {
   console.log('search', req.query.q);
   // expect-next: MASS_ASSIGNMENT_JS
   Object.assign(user, req.body);
+  // expect-next: IDOR_IDENTITY_FROM_REQUEST
+  const mine = await Order.find({ owner: req.query.userId });
   // expect-next: IDOR_LOOKUP
   const order = await Order.findById(req.params.id);
 });

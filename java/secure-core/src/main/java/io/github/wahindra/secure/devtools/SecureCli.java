@@ -25,6 +25,7 @@ import java.util.Set;
  * java -jar secure-core.jar scan src/               # find vulnerable code (exit 1 on HIGH findings)
  * java -jar secure-core.jar check "1;SELECT pg_sleep(5)--"
  * java -jar secure-core.jar probe "http://localhost:8080/api/orders?id=FUZZ"
+ * java -jar secure-core.jar idor http://localhost:8080/api/orders/42 --as-owner "Authorization: Bearer A" --as-other "Authorization: Bearer B"
  * java -jar secure-core.jar rules
  * </pre>
  */
@@ -72,6 +73,9 @@ public final class SecureCli {
         }
         if ("probe".equals(cmd)) {
             return probe(rest, out);
+        }
+        if ("idor".equals(cmd)) {
+            return idor(rest, out);
         }
         if ("rules".equals(cmd)) {
             for (ScanRule r : ScanRule.defaults()) {
@@ -234,6 +238,58 @@ public final class SecureCli {
         return high + medium > 0 ? 1 : 0;
     }
 
+    private static int idor(List<String> args, PrintStream out) throws IOException {
+        IdorProbe.Target t = null;
+        for (int i = 0; i < args.size(); i++) {
+            String a = args.get(i);
+            if (t == null && !a.startsWith("-")) {
+                t = new IdorProbe.Target(a);
+                continue;
+            }
+            if (t == null) {
+                throw new IllegalArgumentException("the object URL must come first");
+            }
+            if ("--as-owner".equals(a) || "--as-other".equals(a)) {
+                String h = value(args, ++i, a);
+                int colon = h.indexOf(':');
+                if (colon <= 0) {
+                    throw new IllegalArgumentException(a + " expects 'Header-Name: value'");
+                }
+                if ("--as-owner".equals(a)) {
+                    t.ownerHeader(h.substring(0, colon).trim(), h.substring(colon + 1).trim());
+                } else {
+                    t.otherHeader(h.substring(0, colon).trim(), h.substring(colon + 1).trim());
+                }
+            } else if ("--method".equals(a) || "-X".equals(a)) {
+                t.method(value(args, ++i, a));
+            } else if ("--data".equals(a) || "-d".equals(a)) {
+                t.body(value(args, ++i, a));
+            } else if ("--marker".equals(a)) {
+                t.marker(value(args, ++i, a));
+            } else if ("--no-anonymous".equals(a)) {
+                t.anonymous(false);
+            } else if ("--allow-remote".equals(a)) {
+                t.allowRemote(true);
+            } else if ("--timeout".equals(a)) {
+                t.timeoutMillis(Integer.parseInt(value(args, ++i, a)) * 1000);
+            } else {
+                throw new IllegalArgumentException("unknown option " + a);
+            }
+        }
+        if (t == null) {
+            throw new IllegalArgumentException("usage: idor <object-url> --as-owner 'Header: value' --as-other 'Header: value'");
+        }
+        int findings = 0;
+        for (IdorProbe.Result r : IdorProbe.run(t)) {
+            out.printf("%-7s %-15s HTTP %3d  %s%n", r.getSeverity() == null ? "ok" : r.getSeverity().name(), r.getAs(),
+                    r.getStatus(), r.getVerdict());
+            if (r.getSeverity() == Severity.HIGH || r.getSeverity() == Severity.MEDIUM) {
+                findings++;
+            }
+        }
+        return findings > 0 ? 1 : 0;
+    }
+
     private static String value(List<String> args, int i, String option) {
         if (i >= args.size()) {
             throw new IllegalArgumentException(option + " needs a value");
@@ -267,6 +323,13 @@ public final class SecureCli {
                     + "      --only sqli,xss,path,cmd,ssti    limit the checks\n"
                     + "      --baseline VALUE                 benign value for the baseline request (default 1)\n"
                     + "      --timeout SECONDS                per request (default 15)\n"
+                    + "      --allow-remote                   allow non-local targets you are authorized to test\n"
+                    + "  idor <object-url>         Check that only the owner can fetch an object (IDOR / BOLA)\n"
+                    + "      --as-owner 'Header: value'       credentials of the object's owner (any login: bearer, cookie, API key)\n"
+                    + "      --as-other 'Header: value'       credentials of a different ordinary user\n"
+                    + "      --marker TEXT                    text only the owner's data contains, for an exact verdict\n"
+                    + "      -X, --method / -d, --data        as for probe\n"
+                    + "      --no-anonymous                   skip the request without credentials\n"
                     + "      --allow-remote                   allow non-local targets you are authorized to test\n"
                     + "  rules                     List the scan rules\n"
                     + "\n"

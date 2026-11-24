@@ -41,6 +41,7 @@ signatures and CSRF tokens use the same format, so either side can verify what t
 - [Developer tools: catch it while coding](#developer-tools-catch-it-while-coding)
 - [Coverage](#coverage)
 - [Benchmark](#benchmark)
+- [Object-level authorization with any identity provider (IDOR / BOLA)](#object-level-authorization-with-any-identity-provider-idor--bola)
 - [Continuous integration](#continuous-integration)
 - [Rolling it out](#rolling-it-out)
 - [Limitations](#limitations)
@@ -56,7 +57,7 @@ js/                       ESM package with TypeScript types and Express middlewa
   bin/secure.js           developer CLI (npx secure scan | check | probe)
   bench/                  benchmark script
 devtools/                 shared by both languages
-  scan-rules.txt          54 source-code rules for `secure scan`
+  scan-rules.txt          55 source-code rules for `secure scan`
   probe-payloads.txt      payloads for `secure probe`
   hooks/pre-commit        git hook that blocks commits with HIGH findings
   ide/vscode-tasks.json   VS Code tasks with a problem matcher (findings in the Problems panel)
@@ -266,6 +267,108 @@ app.use(errorHandler());   // 401/403/400/500 with an incident id; never a stack
 `AccessGuard.requireNoProtectedFields(req.body, 'role')` also rejects `__proto__`, `constructor`
 and `prototype` keys at any depth, which blocks prototype-pollution payloads.
 
+## Object-level authorization with any identity provider (IDOR / BOLA)
+
+**The problem.** With a frontend, an identity provider (Keycloak, Auth0, Entra ID, Okta, Cognito,
+any OIDC issuer) and a backend, logging in only proves *who* the user is. If an endpoint then
+takes "whose data" from the request, as in `GET /api/orders?userId=alice`, any logged-in user can
+change the id and read everyone's data. This is IDOR (Insecure Direct Object Reference), called
+BOLA in the OWASP API Security Top 10 (API1:2023), under A01:2025 Broken Access Control here.
+
+**The fix.**
+1. Verify the token in the backend: signature, issuer, audience, expiry.
+2. Take the user **only from the token** (`sub`, or `oid` for Entra ID), never from the URL, query, body or headers.
+3. Check ownership on every object you load.
+
+This library handles steps 2 and 3. Step 1 belongs to your framework or a JOSE library; never decode a token without verifying it.
+
+| Provider | Mapping | User id | Roles from |
+|---|---|---|---|
+| Keycloak | `ClaimMapping.keycloak("orders-api")` / `ClaimMappings.keycloak({ clientId: 'orders-api' })` | `sub` | `realm_access.roles` + `resource_access.orders-api.roles` |
+| Auth0 | `auth0("https://example.com/roles")` / `auth0({ rolesClaim })` | `sub` | your namespaced claim; permissions from `permissions` |
+| Microsoft Entra ID | `entraId()` | `oid` (stable across apps) | `roles`; scopes `scp`; tenant `tid` |
+| Okta | `okta()` | `sub` | `groups` |
+| AWS Cognito | `cognito()` | `sub` | `cognito:groups` |
+| Any other OIDC / JWT | `standard()`, or the builder / `custom({...})` | configurable | configurable, dot paths |
+
+**Spring Boot** (resource server, e.g. `spring.security.oauth2.resourceserver.jwt.issuer-uri=https://idp.example.com/realms/shop`):
+
+```java
+// Wrong: the caller chooses whose orders to read. secure scan reports IDOR_IDENTITY_FROM_REQUEST.
+@GetMapping("/api/orders")
+List<Order> orders(@RequestParam String userId) { return repo.findByOwnerId(userId); }
+
+// Right: identity from the verified token, ownership checked on the object.
+private static final ClaimMapping IDP = ClaimMapping.keycloak("orders-api");   // or entraId(), okta(), ...
+
+@GetMapping("/api/orders")
+List<Order> myOrders(@AuthenticationPrincipal Jwt jwt) {
+    return repo.findByOwnerId(ClaimsPrincipal.fromVerifiedClaims(jwt.getClaims(), IDP).getId());
+}
+
+@GetMapping("/api/orders/{id}")
+Order order(@PathVariable long id, @AuthenticationPrincipal Jwt jwt) {
+    SecurityPrincipal user = ClaimsPrincipal.fromVerifiedClaims(jwt.getClaims(), IDP);
+    Order order = repo.findById(id).orElseThrow(NotFoundException::new);
+    AccessGuard.requireOwnerOrRole(user, order.getOwnerId(), "admin");          // 403 for anyone else
+    return order;
+}
+```
+
+**Express** (verify with [`jose`](https://github.com/panva/jose), or `express-oauth2-jwt-bearer`, which puts the claims in `req.auth`):
+
+```js
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { principalFromVerifiedClaims, ClaimMappings, AccessGuard } from '@wahindra/secure';
+
+const issuer = 'https://idp.example.com/realms/shop';
+const jwks = createRemoteJWKSet(new URL(`${issuer}/protocol/openid-connect/certs`));
+const IDP = ClaimMappings.keycloak({ clientId: 'orders-api' });                 // or entraId(), okta(), ...
+
+app.use('/api', async (req, res, next) => {
+  try {
+    const token = (req.headers.authorization ?? '').replace(/^Bearer /, '');
+    const { payload } = await jwtVerify(token, jwks, { issuer, audience: 'orders-api' });
+    req.user = principalFromVerifiedClaims(payload, IDP);
+    next();
+  } catch {
+    res.status(401).end();
+  }
+});
+
+app.get('/api/orders/:id', async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  AccessGuard.requireOwnerOrRole(req.user, order.ownerId, 'admin');
+  res.json(order);
+});
+```
+
+**Guidelines:**
+- Store the token's user id (`sub`, or `oid` for Entra ID) as `ownerId` when records are created.
+- Querying by both keys, as in `findByIdAndOwnerId(id, user.getId())`, is better still: other users' records are never loaded, and the response is a 404 that doesn't reveal the record exists.
+- Admin endpoints that take a user id on purpose must require a role. The scanner rule skips files with role checks such as `@PreAuthorize` or `requireAnyRole`.
+- If one backend accepts tokens from several issuers, ids can collide. Use one mapping per issuer, or store `iss + "|" + sub`.
+
+**Check it manually** against your local app, with two users' tokens (or session cookies, or API keys):
+
+```bash
+secure idor http://localhost:8080/api/orders/42 \
+  --as-owner "Authorization: Bearer $TOKEN_ALICE" \
+  --as-other "Authorization: Bearer $TOKEN_BOB" \
+  --marker "alice@shop.test"
+```
+
+```
+ok      owner           HTTP 200  allowed, as expected
+HIGH    other user      HTTP 200  response contains the owner's marker: broken object level authorization (IDOR). ...
+ok      no credentials  HTTP 401  refused (HTTP 401), as expected
+```
+
+`--marker` is text that only the owner's data contains. Without it, a 200 response with a
+different body is reported as MEDIUM for you to check, because a "my orders" list legitimately
+returns each user's own data. Like `probe`, `idor` only targets local and private addresses unless
+you pass `--allow-remote`.
+
 ## Developer tools: catch it while coding
 
 The runtime filter catches attacks in production. These tools catch the **vulnerable code**
@@ -280,6 +383,7 @@ and payloads (`devtools/probe-payloads.txt`).
 | Before packaging / deploying | unit test or CI step | `mvn test` / `npm test` / CI fails on HIGH findings; SARIF for code-scanning UIs |
 | Manual testing, local server | `secure probe` | Fires attack payloads at your own running app and reports what got through |
 | Investigating a blocked request | `secure check` | Shows how the filter decodes a value and which rules match |
+| Checking object-level authorization | `secure idor` | Fetches one object as its owner, as another user and logged out; reports if anyone but the owner gets it |
 
 ```bash
 # Java (any JDK 8+). The jar has no dependencies: download secure-core-0.1.0.jar from the
@@ -299,7 +403,7 @@ Exit codes are `0` ok, `1` findings, `2` usage error, so every command can gate 
 
 ### 1. `secure scan`: find vulnerable code
 
-54 rules cover Java/Kotlin/Groovy/Scala, JavaScript/TypeScript, templates (Thymeleaf, JSP, Vue,
+55 rules cover Java/Kotlin/Groovy/Scala, JavaScript/TypeScript, templates (Thymeleaf, JSP, Vue,
 Handlebars, EJS, Nunjucks, Twig, FreeMarker) and configuration (`.properties`, `.yml`, `.env`).
 Each finding names the OWASP category and the guard in this library that fixes it:
 
@@ -307,13 +411,13 @@ Each finding names the OWASP category and the guard in this library that fixes i
 src/main/java/com/acme/OrderDao.java:42:22: HIGH SQL_STRING_CONCAT [A05:2025 Injection] SQL statement built by string concatenation
     String sql = "SELECT * FROM orders WHERE id = " + id;
     fix: Use a PreparedStatement / parameterized query with ? (or $1) placeholders. Identifiers such as ORDER BY columns cannot be parameters: use SafeSql.allowlisted(...) or SafeSql.mapped(...).
-1 finding(s) (1 HIGH, 0 MEDIUM, 0 LOW) in 128 file(s), 54 rules.
+1 finding(s) (1 HIGH, 0 MEDIUM, 0 LOW) in 128 file(s), 55 rules.
 ```
 
 | Area | Rules (run `secure rules` for the full list) |
 |---|---|
 | A05 Injection | SQL concatenation / `String.format` / template literals / raw ORM queries, NoSQL operator injection, `Runtime.exec`, `sh -c`, `child_process.exec`, `shell: true`, `eval`/`new Function`, script engines / SpEL / OGNL, regex from input, XSS sinks (`innerHTML`, `dangerouslySetInnerHTML`, `th:utext`, `v-html`, `{{{ }}}`, JSP scriptlets, servlet/Express echo) |
-| A01 Broken Access Control | path traversal (Java + Node), Zip Slip, open redirect, SSRF (Java + Node), `anyRequest().permitAll()`, CSRF disabled, CORS `*`, IDOR hint (`findById` with no ownership check in the file), mass assignment / prototype pollution |
+| A01 Broken Access Control | path traversal (Java + Node), Zip Slip, open redirect, SSRF (Java + Node), `anyRequest().permitAll()`, CSRF disabled, CORS `*`, user identity taken from the request instead of the token (`@RequestParam userId`, `req.query.userId`, `X-User-Id`), IDOR hint (`findById` with no ownership check in the file), mass assignment / prototype pollution |
 | A04 / A07 Crypto & auth | MD5/SHA-1, fast hash for passwords, DES/RC4/ECB (and plain `"AES"`), `Random`/`Math.random` for tokens, hard-coded secrets, cloud keys and private keys, TLS validation disabled, insecure cookie flags, unverified JWTs / `alg: none` |
 | A08 Integrity | `ObjectInputStream`, `XMLDecoder`, Jackson default typing, SnakeYAML `new Yaml()`, `node-serialize`, XXE-prone XML parsers |
 | A09 / A10 Logging & errors | request data in logs, secrets in logs, exception details in responses, `printStackTrace()`, empty `catch` |
@@ -358,7 +462,7 @@ deliberate escape hatch.
 
 ```
 src\Dao.java:2:36: HIGH SQL_STRING_CONCAT [A05:2025 Injection] SQL statement built by string concatenation
-1 finding(s) (1 HIGH, 0 MEDIUM, 0 LOW) in 1 file(s), 54 rules.
+1 finding(s) (1 HIGH, 0 MEDIUM, 0 LOW) in 1 file(s), 55 rules.
 
 secure-scan: commit blocked by high findings above. Fix them, or suppress a reviewed one with
   // secure-scan:ignore RULE_ID -- reason
@@ -533,8 +637,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 325 passed, 1 skipped\* | 83.2% | 68.9% |
-| JavaScript (`node --experimental-test-coverage`) | 61 passed | 92.5% | 79.4% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 337 passed, 1 skipped\* | 82.1% | 67.4% |
+| JavaScript (`node --experimental-test-coverage`) | 72 passed | 91.6% | 80.8% |
 | Java servlet filter modules | none yet | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
@@ -546,10 +650,10 @@ Developer Mode). The JavaScript equivalent runs and passes.
 | Package | Lines | Branches |
 |---|---:|---:|
 | `secure` (root) | 90.7% | 83.3% |
-| `.access` | 79.3% | 70.2% |
+| `.access` | 85.4% | 72.5% |
 | `.crypto` | 79.7% | 70.8% |
 | `.detect` | 94.9% | 84.9% |
-| `.devtools` (scanner, probe, CLI) | 78.8% | 69.0% |
+| `.devtools` (scanner, probe, idor, CLI) | 74.5% | 64.1% |
 | `.errors` | 100.0% | 100.0% |
 | `.injection` | 86.2% | 63.2% |
 | `.integrity` | 91.3% | 78.9% |

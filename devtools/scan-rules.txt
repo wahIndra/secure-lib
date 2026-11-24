@@ -8,7 +8,8 @@
 #   scope        code = string-literal contents are masked before matching (default)
 #                raw  = match the line as written (needed when the literal itself matters)
 #   flags        i = case-insensitive
-#   pattern      regex, using only syntax common to Java and JavaScript (no inline (?i), no possessive)
+#   pattern      regex, using only syntax common to Java and JavaScript (no inline (?i), no possessive;
+#                escape "[" inside a character class, since Java treats [[ as a nested class)
 #   unless       optional regex: skip the line if it matches (e.g. it already uses the safe API)
 #   unless-file  optional regex: skip the whole file if it matches anywhere
 #   message      what is wrong
@@ -291,6 +292,16 @@ pattern: \b(?:findById|getById|getReferenceById|findByPk)\s*\(\s*(?:id|\w+Id|req
 unless-file: AccessGuard|requireOwner|@PreAuthorize|@PostAuthorize|@Secured|hasPermission|tenantId|ownerId
 message: Record loaded by id with no ownership check in this file (possible IDOR)
 fix: After loading, call AccessGuard.requireOwnerOrRole(user, record.getOwnerId(), "ADMIN") / requireSameTenant(...), or query by (id, ownerId).
+
+id: IDOR_IDENTITY_FROM_REQUEST
+lang: java, js
+severity: HIGH
+owasp: BROKEN_ACCESS_CONTROL
+scope: raw
+pattern: @(?:RequestParam|PathVariable|RequestHeader|QueryParam|PathParam|HeaderParam)\s*(?:\([^)]*\))?\s*(?:final\s+)?[\w<>]+\s+(?:userId|ownerId|accountId|customerId|memberId|employeeId|uid)\b|\.getParameter\s*\(\s*"(?:userId|ownerId|accountId|customerId|memberId|employeeId|uid)"|\.getHeader\s*\(\s*"[Xx]-(?:User|Account|Owner|Customer)-(?:Id|ID)"|\breq\.(?:query|params|body|headers)\.(?:userId|ownerId|accountId|customerId|memberId|employeeId|uid)\b|\breq\.(?:headers|get)\s*[\[(]\s*["']x-(?:user|account|owner|customer)-id["']
+unless-file: @PreAuthorize|@PostAuthorize|@Secured|@RolesAllowed|hasRole|hasAnyRole|hasAuthority|requireAnyRole|requireAllPermissions
+message: Whose data to return is taken from the request, not from the verified token (IDOR / BOLA): any logged-in user can pass another user's id
+fix: Take the user from the verified token: ClaimsPrincipal.fromVerifiedClaims(jwt.getClaims(), ClaimMapping.keycloak("api")) / principalFromVerifiedClaims(claims, ClaimMappings.keycloak({ clientId: 'api' })), or jwt.getSubject(). If this is an admin endpoint that takes a user id on purpose, require a role for it.
 
 id: MASS_ASSIGNMENT_JS
 lang: js

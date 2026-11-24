@@ -16,7 +16,15 @@ export {
   pathTraversalRules,
 } from './detectors.js';
 export { PathTraversalGuard, PathTraversalError, SafeFileName } from './path.js';
-export { AccessGuard, AccessDeniedError, RouteAccessPolicy, canonicalizePath } from './access.js';
+export {
+  AccessGuard,
+  AccessDeniedError,
+  RouteAccessPolicy,
+  canonicalizePath,
+  ClaimMappings,
+  principalFromVerifiedClaims,
+  getClaim,
+} from './access.js';
 export { UrlGuard, SsrfError, isBlockedAddress } from './ssrf.js';
 export {
   PasswordHasher,

@@ -92,3 +92,33 @@ export declare function probe(
   target: ProbeTarget,
   onResult?: (result: ProbeResult, context: { baseline: { status: number; body: string }; baseMillis: number }) => void,
 ): Promise<ProbeResult[]>;
+
+export declare function checkHostAllowed(url: string, allowRemote?: boolean): Promise<void>;
+
+export interface IdorTarget {
+  /** The object's URL, e.g. http://localhost:3000/api/orders/42 */
+  url: string;
+  /** Headers that authenticate the object's owner, e.g. { Authorization: 'Bearer ...' } or { Cookie: 'sid=...' } */
+  owner: Record<string, string>;
+  /** Headers that authenticate a different ordinary user */
+  other: Record<string, string>;
+  method?: string;
+  body?: string;
+  /** Text only the owner's data contains (an email, order number...). Makes the verdict exact. */
+  marker?: string;
+  /** Also try without credentials (default true) */
+  anonymous?: boolean;
+  /** Allow non-local targets. Only for systems you own or are authorized to test. */
+  allowRemote?: boolean;
+  timeoutMs?: number;
+}
+
+export interface IdorResult {
+  as: 'owner' | 'other user' | 'no credentials';
+  status: number;
+  severity: ScanSeverity | null;
+  verdict: string;
+  vulnerable: boolean;
+}
+
+export declare function idorProbe(target: IdorTarget): Promise<IdorResult[]>;

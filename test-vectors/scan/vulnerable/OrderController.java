@@ -99,6 +99,18 @@ public class OrderController {
         return repository.findById(orderId).orElseThrow();
     }
 
+    // The login check passes for every user, then the caller chooses whose orders to read.
+    @GetMapping("/api/orders")
+    // expect-next: IDOR_IDENTITY_FROM_REQUEST
+    public List<Order> orders(@RequestParam("userId") String userId) {
+        return repository.findByOwnerId(userId);
+    }
+
+    public Account account(HttpServletRequest request) {
+        // expect-next: IDOR_IDENTITY_FROM_REQUEST
+        return accounts.load(request.getHeader("X-User-Id"));
+    }
+
     @Bean
     SecurityFilterChain chain(HttpSecurity http) throws Exception {
         // expect-next: SPRING_CSRF_DISABLED
