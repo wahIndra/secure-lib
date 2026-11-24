@@ -38,10 +38,13 @@ jobs:
     outputs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
+      # The exact commit that was checked. Every later job checks out this SHA, never the tag
+      # name, so a branch named like the tag or a tag moved mid-run cannot change what is built.
+      sha: ${{ steps.v.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
           fetch-depth: 0
 
       - id: v
@@ -63,9 +66,15 @@ jobs:
             echo "::error::Tag $TAG points to a commit that is not on main."
             exit 1
           fi
+          SHA=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if [ "$(git rev-parse HEAD)" != "$SHA" ]; then
+            echo "::error::Checked-out commit does not match tag $TAG ($SHA)."
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Releasing ${TAG#v} from $(git rev-parse "refs/tags/$TAG^{commit}")"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG#v} from $SHA"
 
   ci:
     name: CI
@@ -91,7 +100,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.version.outputs.tag }}
+          ref: ${{ needs.version.outputs.sha }}
+
+      - name: Verify commit
+        env:
+          SHA: ${{ needs.version.outputs.sha }}
+        run: '[ "$(git rev-parse HEAD)" = "$SHA" ] || { echo "::error::checked out $(git rev-parse HEAD), expected $SHA"; exit 1; }'
 
       - uses: actions/setup-java@v6
         with:
@@ -154,7 +168,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.version.outputs.tag }}
+          ref: ${{ needs.version.outputs.sha }}
+
+      - name: Verify commit
+        env:
+          SHA: ${{ needs.version.outputs.sha }}
+        run: '[ "$(git rev-parse HEAD)" = "$SHA" ] || { echo "::error::checked out $(git rev-parse HEAD), expected $SHA"; exit 1; }'
 
       - uses: actions/setup-node@v7
         with:
@@ -192,7 +211,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.version.outputs.tag }}
+          ref: ${{ needs.version.outputs.sha }}
+
+      - name: Verify commit
+        env:
+          SHA: ${{ needs.version.outputs.sha }}
+        run: '[ "$(git rev-parse HEAD)" = "$SHA" ] || { echo "::error::checked out $(git rev-parse HEAD), expected $SHA"; exit 1; }'
 
       # Taking the jar from Maven Central (not from this run's build) also proves it is published.
       - name: Download the CLI jar from Maven Central
