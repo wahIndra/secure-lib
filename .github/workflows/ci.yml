@@ -60,6 +60,25 @@ jobs:
           name: surefire-reports-java${{ matrix.java }}-${{ matrix.os }}
           path: java/**/target/surefire-reports/
 
+  # The starter is compiled against Spring Boot 3.5 (the java job, on JDK 17+). This runs its
+  # end-to-end tests against Spring Boot 4 as well.
+  spring-boot-4:
+    name: Spring Boot 4 starter (Java 21)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: java/**/pom.xml
+
+      - name: Starter end-to-end tests on Spring Boot 4
+        working-directory: java
+        run: mvn -B -ntp verify -pl secure-spring-boot-starter -am -Dspring-boot.version=4.2.0
+
   node:
     name: Node ${{ matrix.node }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -94,6 +113,10 @@ jobs:
         run: |
           npm pack --dry-run --json > pack.json
           node -e "const f=require('./pack.json')[0].files.map(x=>x.path); for (const p of ['bin/secure.js','devtools/scan-rules.txt','devtools/probe-payloads.txt','src/index.js','index.d.ts']) { if (!f.includes(p)) { console.error('missing from package: '+p); process.exit(1); } } console.log(f.length+' files OK')"
+
+      - name: Type-check the TypeScript definitions
+        if: matrix.node == '24' && matrix.os == 'ubuntu-latest'
+        run: npx -y -p typescript@5 tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 index.d.ts express.d.ts devtools.d.ts
 
       # npm silently drops invalid fields at publish time (e.g. a bin path it dislikes), which
       # would ship a package without the CLI. Fail here instead.

@@ -121,7 +121,7 @@ test('login limiter drops an expired lockout before evicting a live counter', ()
 
 test('request inspector fails closed on nesting deeper than it inspects', () => {
   let deep = { q: "' OR 1=1--" };
-  for (let i = 0; i < 15; i++) deep = { a: deep };
+  for (let i = 0; i < 30; i++) deep = { a: deep };
   const r = new HttpRequestInspector().inspect({ body: deep });
   assert.equal(r.malicious, true);
   assert.match(r.summary, /nesting-too-deep/);

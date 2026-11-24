@@ -38,7 +38,9 @@ signatures and CSRF tokens use the same format, so either side can verify what t
 - [Compatibility](#compatibility)
 - [How to use: Java](#how-to-use-java)
 - [How to use: JavaScript](#how-to-use-javascript)
+- [API protection: JSON bodies, budgets, rate limits, CORS, redirects, events](#api-protection-json-bodies-budgets-rate-limits-cors-redirects-events)
 - [Developer tools: catch it while coding](#developer-tools-catch-it-while-coding)
+- [End-to-end check in your own app](#end-to-end-check-in-your-own-app)
 - [Coverage](#coverage)
 - [Benchmark](#benchmark)
 - [Object-level authorization with any identity provider (IDOR / BOLA)](#object-level-authorization-with-any-identity-provider-idor--bola)
@@ -52,7 +54,8 @@ signatures and CSRF tokens use the same format, so either side can verify what t
 java/                     Maven multi-module, compiled with --release 8
   secure-core/            detectors and guards (no dependencies)
   secure-servlet-javax/   Filter for javax.servlet  (Java EE 8, Spring Boot 2, Tomcat 9)
-  secure-servlet-jakarta/ Filter for jakarta.servlet (Jakarta EE 9+, Spring Boot 3, Tomcat 10+)
+  secure-servlet-jakarta/ Filter for jakarta.servlet (Jakarta EE 9+, Tomcat 10+)
+  secure-spring-boot-starter/ Spring Boot 3 / 4 auto-configuration (Java 17+), with end-to-end tests
 js/                       ESM package with TypeScript types and Express middleware
   bin/secure.js           developer CLI (npx secure scan | check | probe)
   bench/                  benchmark script
@@ -68,6 +71,7 @@ docs/OWASP-MAPPING.md     what covers each Top 10 category
   workflows/release.yml   on a vX.Y.Z tag: CI, then Maven Central + npm + GitHub release
   dependabot.yml          weekly Maven, npm and GitHub Actions updates
 RELEASING.md              how to cut a release and the one-time account setup
+CHANGELOG.md              changes per version
 ```
 
 ## Compatibility
@@ -84,6 +88,8 @@ every push and pull request (see [Continuous integration](#continuous-integratio
 | Java 25 | Temurin 25 | Oracle 25.0.2 |
 | Node.js 20 / 22 | 20, 22 | 21.6.2 |
 | Node.js 24 / 26 | 24 (Linux + Windows), 26 | 24.22.1, 26.12.1 |
+| Spring Boot 3.5 (starter) | end-to-end tests on Java 17, 21, 25 | Temurin 21 |
+| Spring Boot 4.2 (starter) | end-to-end tests on Java 21 | Temurin 21 |
 
 The library uses no reflection and no JDK internals, so the Java 17+ module encapsulation does
 not affect it.
@@ -98,7 +104,8 @@ Every artifact ships with sources and javadoc, and is signed with key
 
 | Your stack | artifactId |
 |---|---|
-| Spring Boot 3, Jakarta EE 9+, Tomcat 10+ | `secure-servlet-jakarta` |
+| **Spring Boot 3 or 4** (recommended: everything auto-configured) | `secure-spring-boot-starter` (from 0.2.0) |
+| Other Jakarta EE 9+ / Tomcat 10+ apps | `secure-servlet-jakarta` |
 | Spring Boot 2, Java EE 8, Tomcat 9 | `secure-servlet-javax` |
 | Guards and detectors only (no servlet) | `secure-core` |
 
@@ -124,9 +131,61 @@ mvn -Pcoverage verify       # same, plus a JaCoCo report in secure-core/target/s
 mvn -Prelease -Dgpg.skip verify   # also builds the sources and javadoc jars Maven Central requires
 ```
 
-### 1. Request filter (detection + security headers)
+### Spring Boot starter (Spring Boot 3 and 4)
 
-Spring Boot 3 (on Spring Boot 2 import `io.github.wahindra.secure.servlet.javax.SecurityFilter`):
+One dependency registers everything: the request filter (inspection including JSON bodies,
+security headers, optional CORS and rate limit), `@CurrentUser` injection from the verified
+token, safe 401/403/400 responses for the library's exceptions, and your `SecurityEventListener`
+beans. It runs before Spring Security, so attacks are rejected before authentication work.
+
+```xml
+<dependency>
+  <groupId>io.github.wahindra</groupId>
+  <artifactId>secure-spring-boot-starter</artifactId>
+  <version>0.2.0</version>
+</dependency>
+```
+
+```yaml
+# application.yml (every value is optional; these are examples, not the defaults)
+secure:
+  mode: monitor                  # start with monitor in production, then switch to block (the default)
+  identity:
+    provider: keycloak           # standard | keycloak | auth0 | entra-id | okta | cognito
+    client-id: orders-api        # Keycloak client whose roles are granted
+  cors:
+    allowed-origins: https://app.example.com
+    allow-credentials: true
+  rate-limit:
+    enabled: true
+    requests-per-minute: 300     # per client address
+  inspection:
+    max-body-bytes: 1048576      # larger JSON bodies are rejected in block mode
+```
+
+```java
+@GetMapping("/api/orders/{id}")
+Order order(@PathVariable long id, @CurrentUser SecurityPrincipal user) {   // from the verified token
+    Order order = repo.findById(id).orElseThrow(NotFoundException::new);
+    AccessGuard.requireOwnerOrRole(user, order.getOwnerId(), "admin");      // 403 for anyone else
+    return order;
+}
+
+@Bean
+SecurityEventListener alerts(SlackClient slack) {                          // blocked requests, 429s,
+    return event -> slack.post(event.toJson());                            // access denials, lockouts
+}
+```
+
+All `secure.*` properties are in `SecureProperties`. The starter's tests start a real Spring
+Boot app (Spring Security JWT resource server with Keycloak-shaped tokens) on **both Spring Boot
+3.5 and 4.2**, and attack it with `secure probe` and `secure idor`. With the starter on, nothing
+gets through. With it off, the probe finds the XSS in the same app. See
+[the end-to-end check](#end-to-end-check-in-your-own-app).
+
+### 1. Request filter, without Spring Boot (detection + security headers)
+
+Plain servlet containers or Spring Boot 2 (javax). On Spring Boot 3 or 4, prefer the starter above.
 
 ```java
 import io.github.wahindra.secure.servlet.jakarta.SecurityFilter;
@@ -372,6 +431,47 @@ different body is reported as MEDIUM for you to check, because a "my orders" lis
 returns each user's own data. Like `probe`, `idor` only targets local and private addresses unless
 you pass `--allow-remote`.
 
+## API protection: JSON bodies, budgets, rate limits, CORS, redirects, events
+
+These run inside the filter or middleware (all of them are on in the Spring Boot starter, and
+CORS and rate limiting are opt-in), and each one is also available as a standalone class.
+
+| Feature | Java (`io.github.wahindra.secure.web`) | JavaScript | What it stops |
+|---|---|---|---|
+| **JSON body inspection** | `SecurityFilterEngine`, servlet filters | `securityMiddleware()` (parsed `req.body`) | Injection payloads in API bodies. The servlet filter reads the body once and replays it unchanged to the app. |
+| **Inspection budget** | `HttpRequestInspector.builder().maxValues(2000).maxInspectedChars(256 KB).maxJsonDepth(20)` | `new HttpRequestInspector({ maxValues, maxInspectedChars, maxDepth })` | Payloads hidden behind padding, and requests built to burn CPU. Hitting a limit counts as malicious (fail closed). JSON bodies over 1 MB are rejected in block mode. |
+| **Rate limiting** | `RateLimiter.perMinute(300)`; `secure.rate-limit.*` | `RateLimiter.perMinute(300)`, `rateLimit()` middleware | Scraping, enumeration, brute force on any endpoint. Token bucket per key, 429 with `Retry-After` and `RateLimit-*` headers, bounded memory. |
+| **Strict CORS** | `CorsPolicy.builder().allowOrigins(...)`; `secure.cors.*` | `new CorsPolicy({ allowOrigins })`, `cors()` middleware | Any origin reading your API with the user's cookies. Never reflects `Origin`, never allows `null`, refuses `*` with credentials, answers preflights directly. |
+| **Safe redirects** | `SafeRedirect.target(next, "/", "accounts.example.com")` | `safeRedirect(next, '/', ['accounts.example.com'])` | Open redirects: `//evil`, `/\evil`, `/%2F%2Fevil`, `javascript:`, `https://good@evil`, header injection. |
+| **Security events** | `SecurityEventListener`; `LoginAttemptLimiter.onLockout(...)` | `onEvent` option; `limiter.onLockout(...)` | Attacks nobody notices (A09). `REQUEST_BLOCKED`, `REQUEST_FLAGGED`, `RATE_LIMITED`, `CORS_REJECTED`, `ACCESS_DENIED`, `LOGIN_LOCKED`, `INSPECTION_ERROR` as sanitized events (`toJson()` gives one line for a SIEM). |
+
+```java
+// Without Spring Boot: the same engine powers the javax and jakarta filters.
+SecurityFilterEngine engine = SecurityFilterEngine.builder()
+        .mode(SecurityFilterEngine.Mode.BLOCK)
+        .cors(CorsPolicy.builder().allowOrigins("https://app.example.com").allowCredentials(true).build())
+        .rateLimiter(RateLimiter.perMinute(300))
+        .listener(event -> siemQueue.offer(event.toJson()))
+        .build();
+servletContext.addFilter("secure", new SecurityFilter(engine)).addMappingForUrlPatterns(null, false, "/*");
+```
+
+```js
+app.use(express.json({ limit: '1mb' }));
+app.use(securityMiddleware({
+  cors: new CorsPolicy({ allowOrigins: ['https://app.example.com'], allowCredentials: true }),
+  rateLimiter: RateLimiter.perMinute(300),
+  onEvent: (event) => siem.send(event),
+}));
+app.post('/login', rateLimit(RateLimiter.perMinute(10)), loginHandler);    // stricter limit for one route
+app.get('/go', (req, res) => res.redirect(safeRedirect(req.query.next, '/', ['accounts.example.com'])));
+```
+
+The rate-limit key is the client address. Behind a reverse proxy, make sure that's the real
+client address, by configuring Express `trust proxy` or the servlet container's
+`RemoteIpValve` / `server.forward-headers-strategy` for your proxy only. Otherwise every client
+can choose its own key with `X-Forwarded-For`.
+
 ## Developer tools: catch it while coding
 
 The runtime filter catches attacks in production. These tools catch the **vulnerable code**
@@ -579,6 +679,40 @@ reaches a sink through helper methods, can be missed. A pattern can also match s
 that's what reviewed suppressions are for. Use it as the always-on first check, and add a
 data-flow SAST (Semgrep, CodeQL, SonarQube) in CI for depth.
 
+## End-to-end check in your own app
+
+Before deploying, attack your running app the way the library's own CI does. With the app
+running locally, plus tokens (or cookies) for two ordinary users:
+
+```bash
+# 1. Injection, XSS, traversal, command and template injection against each input
+secure probe "http://localhost:8080/api/search?q=FUZZ"
+secure probe "http://localhost:8080/api/orders" -X POST -d '{"note":"FUZZ"}' -H "Authorization: Bearer $TOKEN_ALICE"
+
+# 2. Object-level authorization on each endpoint that returns one user's data
+secure idor http://localhost:8080/api/orders/42 \
+  --as-owner "Authorization: Bearer $TOKEN_ALICE" --as-other "Authorization: Bearer $TOKEN_BOB" --marker "alice@"
+
+# 3. The code itself
+secure scan src/
+```
+
+Exit code 0 from all three means nothing was found. This repository runs exactly this against
+a real Spring Boot app in `secure-spring-boot-starter/src/test/.../demo/`, on Spring Boot 3.5
+and 4.2 in CI:
+
+| Check | With the starter | Starter switched off (control) |
+|---|---|---|
+| `secure probe` on a deliberately vulnerable `/api/search` | 0 findings, 30+ payloads blocked | reflected XSS found (HIGH) |
+| JSON body attack `{"q":"' OR 1=1--"}` | 400; clean bodies reach the controller unchanged | n/a |
+| `secure idor` on the correct `/api/orders/{id}` | 0 findings (other user 403, anonymous 401) | n/a |
+| `secure idor` on the broken `/api/vuln/orders/{id}` | HIGH: the other user can read it | n/a |
+| Rate limit 3/min | 4th request 429 with `Retry-After` | n/a |
+| CORS preflight, open redirect, security headers | allowed origin 204, other 403; `next=https://evil` goes to `/` | n/a |
+
+To check the code itself rather than the filter, run the probe with `secure.mode=monitor` or the
+starter disabled. Then you see what the application would do without the safety net.
+
 ## Coverage
 
 ### OWASP Top 10
@@ -589,15 +723,15 @@ is in [docs/OWASP-MAPPING.md](docs/OWASP-MAPPING.md).
 
 | 2025 | Category | Covered by |
 |---|---|---|
-| A01 | Broken Access Control (incl. SSRF) | route policy, ownership/tenant/mass-assignment guards, path traversal guard + detector, CSRF, SSRF URL guard |
-| A02 | Security Misconfiguration | security headers, leaky-header list, filter/middleware |
+| A01 | Broken Access Control (incl. SSRF) | route policy, ownership/tenant/mass-assignment guards, identity from verified tokens, `secure idor`, path traversal guard + detector, CSRF, strict CORS, safe redirects, SSRF URL guard |
+| A02 | Security Misconfiguration | security headers, leaky-header list, filter/middleware, Spring Boot starter defaults |
 | A03 | Software Supply Chain Failures | zero dependencies; run OWASP Dependency-Check / `npm audit` in CI (build-time concern) |
 | A04 | Cryptographic Failures | PBKDF2 password hashing, secure tokens, constant-time compare, HMAC |
 | A05 | Injection | SQLi / XSS / command / JNDI / EL / SSTI detectors, `SafeSql`, `SafeCommand`, output encoders |
-| A06 | Insecure Design | login throttling, deny-by-default, parameter-count cap |
+| A06 | Insecure Design | API rate limiting, login throttling, deny-by-default, per-request inspection budget |
 | A07 | Authentication Failures | password policy, login attempt limiter, password hashing |
 | A08 | Software or Data Integrity Failures | deserialization allowlist (Java), webhook HMAC verification |
-| A09 | Security Logging and Alerting Failures | log sanitizer (CRLF, secret masking), incident logging |
+| A09 | Security Logging and Alerting Failures | security events for alerting (`SecurityEventListener` / `onEvent`), log sanitizer (CRLF, secret masking), incident logging |
 | A10 | Mishandling of Exceptional Conditions | generic error bodies with incident ids, fail-closed filter/middleware |
 
 ### Detected attack families
@@ -640,9 +774,10 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 338 passed, 1 skipped\* | 82.1% | 67.4% |
-| JavaScript (`node --experimental-test-coverage`) | 73 passed | 91.6% | 80.8% |
-| Java servlet filter modules | none yet | not measured | not measured |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 369 passed, 1 skipped* | 83.1% | 69.4% |
+| JavaScript (`node --experimental-test-coverage`) | 82 passed | 92.6% | 82.5% |
+| Java servlet filters (javax, jakarta) | 8 + 8 passed | not measured | not measured |
+| Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 7 passed on each | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
 Developer Mode). The JavaScript equivalent runs and passes.
@@ -653,8 +788,8 @@ Developer Mode). The JavaScript equivalent runs and passes.
 | Package | Lines | Branches |
 |---|---:|---:|
 | `secure` (root) | 90.7% | 83.3% |
-| `.access` | 85.4% | 72.5% |
-| `.crypto` | 79.7% | 70.8% |
+| `.access` | 86.6% | 73.0% |
+| `.crypto` | 81.7% | 73.4% |
 | `.detect` | 94.9% | 84.9% |
 | `.devtools` (scanner, probe, idor, CLI) | 74.5% | 64.1% |
 | `.errors` | 100.0% | 100.0% |
@@ -663,7 +798,7 @@ Developer Mode). The JavaScript equivalent runs and passes.
 | `.logging` | 89.3% | 75.0% |
 | `.path` | 82.8% | 70.4% |
 | `.ssrf` | 78.6% | 55.6% |
-| `.web` | 88.7% | 65.3% |
+| `.web` (filter engine, rate limit, CORS, redirects, events) | 86.3% | 75.8% |
 
 </details>
 
@@ -742,8 +877,9 @@ rescan the input from every position are bounded, and normalization skips work f
 
 | Job | What it checks |
 |---|---|
-| **Java** | `mvn verify` on Temurin 8, 11, 17, 21 and 25 (Linux) and 21 (Windows). Java 21 also produces the JaCoCo report (downloadable artifact `jacoco-report`). Surefire reports are uploaded when a job fails. |
-| **Node** | `npm test` on Node 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, and fails if npm would rewrite `package.json` at publish time. |
+| **Java** | `mvn verify` on Temurin 8, 11, 17, 21 and 25 (Linux) and 21 (Windows). On Java 17+ this includes the Spring Boot starter and its end-to-end tests (Spring Boot 3.5). Java 21 also produces the JaCoCo report (downloadable artifact `jacoco-report`). Surefire reports are uploaded when a job fails. |
+| **Node** | `npm test` on Node 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, type-checks the TypeScript definitions, and fails if npm would rewrite `package.json` at publish time. |
+| **Spring Boot 4 starter** | The starter's end-to-end tests again, against Spring Boot 4.2 (`-Dspring-boot.version=4.2.0`). |
 | **Security scan** | The repository scans itself with `secure scan`. Results appear under *Security → Code scanning* (SARIF), and the job fails on any HIGH finding. |
 | **Java and JavaScript agree** | Both CLIs scan the shared fixtures, and `.github/scripts/compare-scanners.mjs` fails if their findings differ. |
 
@@ -772,12 +908,17 @@ GitHub release with the CLI jar attached. See [RELEASING.md](RELEASING.md).
 
 - Signature detection can be evaded by novel encodings. Treat it as a tripwire and a scanner
   filter, not as your protection against SQL injection or XSS.
-- The servlet filter doesn't read request bodies (that would consume the stream). Form
-  parameters are inspected through `getParameterMap()`, but JSON bodies are not. The Express
-  middleware does inspect parsed JSON bodies.
-- There is no per-request inspection budget yet: a request with the maximum 500 parameters of
-  64 KB each would take roughly 1.7 s to inspect. Keep the container's request-size limits
-  (e.g. Tomcat `maxPostSize`, `express.json({ limit })`) in place.
+- Request bodies: JSON bodies are inspected (up to `maxBodyBytes`, 1 MB by default). XML,
+  multipart and other body types are not inspected; form bodies are, through the parameters.
+  Keep the container's request-size limits (Tomcat `maxPostSize`, `express.json({ limit })`) in
+  place too.
+- Inspection is capped per request (2,000 values, 256 K characters, nesting depth 20 by default).
+  A request over a cap counts as malicious. A legitimate API that sends bigger requests needs
+  higher limits (`secure.inspection.*` or the builder), or the filter excluded from those
+  routes.
+- `RateLimiter` and `LoginAttemptLimiter` keep their state in memory, per instance. With several
+  instances, divide the limits by the instance count, or apply the same rules in a shared store
+  (Redis) or at the gateway.
 - `LoginAttemptLimiter` keeps its state in memory. Use a shared store when running multiple instances.
   It tracks at most `maxTrackedKeys` keys (default 100,000). When full, it drops expired entries,
   then evicts the entry with the **fewest** live failures (oldest first), and active lockouts
@@ -787,6 +928,7 @@ GitHub release with the CLI jar attached. See [RELEASING.md](RELEASING.md).
   one extra guess per 100,000 requests. Alert on a rising `evictionCount()` / `evictionCount`,
   and put a per-IP limiter in front so one source can't produce that volume. Use separate
   instances for accounts and IPs so flooding one cannot push entries out of the other.
-- The servlet filter modules have no automated tests yet; they have only been compiled.
+- The Spring Boot starter supports servlet (Spring MVC) applications. WebFlux (reactive) apps
+  can use `SecurityFilterEngine` directly, but have no auto-configuration yet.
 - Supply chain (A03) is a build-time concern. Run `mvn org.owasp:dependency-check-maven:check`
   and `npm audit` in CI.

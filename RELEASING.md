@@ -21,7 +21,11 @@ breaking changes.
 2. runs the full CI suite (every JDK and Node version, self-scan, Java/JS parity),
 3. sets the version from the tag, signs and uploads to Maven Central, waits until it is published,
 4. publishes `@wahindra/secure` to npm through **trusted publishing** (no token; provenance attached),
-5. creates the GitHub release with install snippets and `secure-core-X.Y.Z.jar`.
+5. creates the GitHub release with that version's `CHANGELOG.md` section, install snippets and
+   `secure-core-X.Y.Z.jar`.
+
+Before tagging, replace `unreleased` with the date in the version's `CHANGELOG.md` heading, e.g.
+`## [0.2.0] - 2026-12-01`, and update the version in the README install snippets.
 
 If any step fails, nothing later runs. Maven Central and npm releases cannot be overwritten
 or deleted. To fix a bad release, tag the next patch version.

@@ -1,5 +1,10 @@
 package io.github.wahindra.secure.crypto;
 
+import io.github.wahindra.secure.OwaspCategory;
+import io.github.wahindra.secure.errors.SafeErrors;
+import io.github.wahindra.secure.web.SecurityEvent;
+import io.github.wahindra.secure.web.SecurityEventListener;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
@@ -64,6 +69,7 @@ public final class LoginAttemptLimiter {
     private final LinkedHashMap<String, Entry>[] levels;
     private long lastMaintenance = Long.MIN_VALUE / 2;
     private long evictions;
+    private volatile SecurityEventListener lockoutListener;
 
     public LoginAttemptLimiter() {
         this(5, Duration.ofMinutes(15), Duration.ofMinutes(15), 100_000, Clock.systemUTC());
@@ -96,7 +102,32 @@ public final class LoginAttemptLimiter {
         return e == null ? Duration.ZERO : Duration.ofMillis(Math.max(0, e.lockedUntil - clock.millis()));
     }
 
-    public synchronized void recordFailure(String key) {
+    /**
+     * Reports a {@code LOGIN_LOCKED} {@link SecurityEvent} whenever a key becomes locked. The
+     * listener runs outside the limiter's lock, so a slow listener cannot stall other logins.
+     */
+    public LoginAttemptLimiter onLockout(SecurityEventListener listener) {
+        this.lockoutListener = listener;
+        return this;
+    }
+
+    public void recordFailure(String key) {
+        if (recordFailureLocked(key)) {
+            SecurityEventListener l = lockoutListener;
+            if (l != null) {
+                try {
+                    l.onEvent(SecurityEvent.builder(SecurityEvent.Type.LOGIN_LOCKED, SafeErrors.newIncidentId())
+                            .principalId(key).category(OwaspCategory.AUTHENTICATION_FAILURES)
+                            .detail(maxFailures + " failures; locked for " + (lockMillis / 1000) + " s").build());
+                } catch (RuntimeException ignored) {
+                    // A broken listener must never affect authentication.
+                }
+            }
+        }
+    }
+
+    /** @return {@code true} if this failure locked the key */
+    private synchronized boolean recordFailureLocked(String key) {
         long now = clock.millis();
         Entry e = entries.get(key);
         if (e == null) {
@@ -112,12 +143,15 @@ public final class LoginAttemptLimiter {
             e.failures = 0;
         }
         e.failures++;
+        boolean locked = false;
         if (e.failures >= maxFailures) {
             e.lockedUntil = now + lockMillis;
             e.failures = 0;
             e.windowStart = now;
+            locked = true;
         }
         moveTo(e, e.lockedUntil > now ? maxFailures : e.failures);
+        return locked;
     }
 
     public synchronized void recordSuccess(String key) {

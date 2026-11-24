@@ -225,10 +225,10 @@ export declare class PasswordHasher {
 }
 
 export declare class HmacSigner {
-  constructor(secretKey: string | Buffer | Uint8Array);
-  sign(data: string | Buffer): string;
-  verify(data: string | Buffer, signature: string): boolean;
-  verifyHex(payload: string | Buffer, hexSignature: string): boolean;
+  constructor(secretKey: string | Uint8Array);
+  sign(data: string | Uint8Array): string;
+  verify(data: string | Uint8Array, signature: string): boolean;
+  verifyHex(payload: string | Uint8Array, hexSignature: string): boolean;
 }
 
 export declare class LoginAttemptLimiter {
@@ -240,6 +240,8 @@ export declare class LoginAttemptLimiter {
   readonly trackedKeys: number;
   /** Entries evicted to stay under the cap since start. A steady rise means a flood: alert on it. */
   readonly evictionCount: number;
+  /** Reports a LOGIN_LOCKED event whenever a key becomes locked. */
+  onLockout(listener: (event: SecurityEvent) => void): this;
 }
 
 export declare function randomToken(bytes?: number): string;
@@ -260,7 +262,7 @@ export declare function securityHeaders(
 ): Record<string, string>;
 
 export declare class CsrfTokenService {
-  constructor(secretKey: string | Buffer | Uint8Array);
+  constructor(secretKey: string | Uint8Array);
   generate(sessionId: string): string;
   verify(sessionId: string | null | undefined, token: unknown): boolean;
   static requiresToken(method: string): boolean;
@@ -300,12 +302,90 @@ export declare const DEFAULT_HEADERS: readonly string[];
 export interface InspectionReport {
   malicious: boolean;
   suspicious: boolean;
+  /** A limit was hit, so part of the request was not inspected; counted as malicious. */
+  budgetExceeded: boolean;
   findings: Finding[];
   /** e.g. "param:id=[SQLI_PG_SLEEP[HIGH]]". Never contains the offending values. */
   summary: string;
 }
 
 export declare class HttpRequestInspector {
-  constructor(options?: { inspector?: InputInspector; headers?: string[]; inspectBody?: boolean });
+  constructor(options?: { inspector?: InputInspector; headers?: string[]; inspectBody?: boolean;
+    maxValues?: number; maxInspectedChars?: number; maxDepth?: number });
   inspect(req?: { path?: string; query?: unknown; body?: unknown; headers?: Record<string, string | string[] | undefined> }): InspectionReport;
 }
+
+// ---------------------------------------------------------------- API protection
+
+export declare const DEFAULT_MAX_VALUES: number;
+export declare const DEFAULT_MAX_INSPECTED_CHARS: number;
+export declare const DEFAULT_MAX_DEPTH: number;
+
+export interface RateLimitDecision {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  retryAfterMs: number;
+  resetMs: number;
+  /** RateLimit-Limit / -Remaining / -Reset, plus Retry-After when limited */
+  headers: Record<string, string>;
+}
+
+export declare class RateLimiter {
+  constructor(options: { capacity: number; periodMs: number; maxKeys?: number; now?: () => number });
+  static perSecond(requests: number): RateLimiter;
+  static perMinute(requests: number): RateLimiter;
+  tryAcquire(key: string | null | undefined): RateLimitDecision;
+  readonly trackedKeys: number;
+}
+
+export declare function isSafeRedirect(requested: unknown, allowedHosts?: string[]): boolean;
+export declare function safeRedirect(requested: unknown, fallback?: string, allowedHosts?: string[]): string;
+
+export declare class CorsPolicy {
+  constructor(options: {
+    allowOrigins: string[];
+    allowMethods?: string[];
+    allowHeaders?: string[];
+    exposeHeaders?: string[];
+    allowCredentials?: boolean;
+    maxAgeSeconds?: number;
+  });
+  isAllowedOrigin(origin: unknown): boolean;
+  evaluate(request: { origin?: string; method?: string; requestMethod?: string; requestHeaders?: string }): {
+    preflight: boolean;
+    allowed: boolean;
+    headers: Record<string, string>;
+  };
+}
+
+export type SecurityEventTypeName =
+  | 'REQUEST_BLOCKED' | 'REQUEST_FLAGGED' | 'RATE_LIMITED' | 'CORS_REJECTED' | 'ACCESS_DENIED' | 'LOGIN_LOCKED' | 'INSPECTION_ERROR';
+
+export declare const SecurityEventType: Readonly<Record<SecurityEventTypeName, SecurityEventTypeName>>;
+
+export interface SecurityEvent {
+  readonly type: SecurityEventTypeName;
+  readonly incidentId: string;
+  readonly timestamp: string;
+  readonly method?: string;
+  readonly path?: string;
+  readonly remoteAddress?: string;
+  readonly principalId?: string;
+  readonly owasp?: string;
+  readonly category?: string;
+  readonly ruleIds: readonly string[];
+  readonly detail?: string;
+}
+
+export declare function securityEvent(
+  type: SecurityEventTypeName,
+  fields?: { incidentId?: string; method?: string; path?: string; remoteAddress?: string; principalId?: string;
+    category?: OwaspCategoryInfo; ruleIds?: string[]; detail?: string },
+): SecurityEvent;
+
+export declare function emitSecurityEvent(
+  event: SecurityEvent,
+  listeners?: Array<(event: SecurityEvent) => void>,
+  logger?: { log?: (m: string) => void; info?: (m: string) => void; warn?: (m: string) => void },
+): void;

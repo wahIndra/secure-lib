@@ -239,13 +239,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # This version's section of CHANGELOG.md ("## [X.Y.Z] ..." up to the next "## ["), if present.
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > changes.md || true
           cat > notes.md <<EOF
+          $(cat changes.md)
+
           **Maven Central**
 
           \`\`\`xml
           <dependency>
             <groupId>io.github.wahindra</groupId>
-            <artifactId>secure-servlet-jakarta</artifactId> <!-- or secure-servlet-javax / secure-core -->
+            <artifactId>secure-spring-boot-starter</artifactId> <!-- or secure-servlet-jakarta / -javax / secure-core -->
             <version>${VERSION}</version>
           </dependency>
           \`\`\`

@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
+import { OwaspCategory } from './owasp.js';
+import { securityEvent, SecurityEventType } from './api.js';
 
 const pbkdf2 = promisify(crypto.pbkdf2);
 
@@ -184,13 +186,34 @@ export class LoginAttemptLimiter {
       e.failures = 0;
     }
     e.failures++;
+    let locked = false;
     if (e.failures >= this.maxFailures) {
       e.lockedUntil = now + this.lockoutMs;
       e.failures = 0;
       e.windowStart = now;
+      locked = true;
     }
     this.#moveTo(e, e.lockedUntil > now ? this.maxFailures : e.failures);
+    if (locked && this.#lockoutListener) {
+      try {
+        this.#lockoutListener(securityEvent(SecurityEventType.LOGIN_LOCKED, {
+          principalId: key,
+          category: OwaspCategory.AUTHENTICATION_FAILURES,
+          detail: `${this.maxFailures} failures; locked for ${Math.round(this.lockoutMs / 1000)} s`,
+        }));
+      } catch {
+        // A broken listener must never affect authentication.
+      }
+    }
   }
+
+  /** Reports a LOGIN_LOCKED security event whenever a key becomes locked. */
+  onLockout(listener) {
+    this.#lockoutListener = listener;
+    return this;
+  }
+
+  #lockoutListener = null;
 
   recordSuccess(key) {
     const e = this.#entries.get(key);

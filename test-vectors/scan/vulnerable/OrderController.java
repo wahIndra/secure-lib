@@ -12,6 +12,8 @@ public class OrderController {
         conn.createStatement().executeQuery("select * from users where name = '" + name + "'");
         // expect-next: SQL_CLAUSE_CONCAT
         String q = base + " ORDER BY " + sort;
+        // expect-next: SQL_STRING_CONCAT
+        String page = "SELECT * FROM orders ORDER BY id LIMIT " + size;
         // expect-next: SQL_FORMAT
         String f = String.format("SELECT * FROM t WHERE a = '%s'", id);
         // expect-next: SQL_STRING_CONCAT, SQL_EXECUTE_CONCAT

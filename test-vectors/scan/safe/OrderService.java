@@ -18,6 +18,8 @@ public class OrderService {
         return order;
     }
 
+    private static final String NOTE = "limit " + 10 + " per minute";
+
     public Path upload(MultipartFile upload, PathTraversalGuard guard) throws Exception {
         Path target = guard.resolve(SafeFileName.sanitize(upload.getOriginalFilename()));
         Files.write(target, upload.getBytes());

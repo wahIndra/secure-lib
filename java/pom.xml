@@ -57,6 +57,8 @@
     <!-- Bytecode target is Java 8 so one jar runs on 8, 11, 17, 21, 25. -->
     <maven.compiler.source>1.8</maven.compiler.source>
     <maven.compiler.target>1.8</maven.compiler.target>
+    <!-- javadoc target; modules built for a newer Java override it -->
+    <javadoc.release>8</javadoc.release>
     <junit.version>5.14.4</junit.version>
   </properties>
 
@@ -160,7 +162,7 @@
             <artifactId>maven-javadoc-plugin</artifactId>
             <version>3.12.0</version>
             <configuration>
-              <release>8</release>
+              <release>${javadoc.release}</release>
               <quiet>true</quiet>
               <!-- Missing @param/@return tags are allowed; broken HTML or references still fail the build. -->
               <doclint>all,-missing</doclint>
@@ -206,6 +208,16 @@
           </plugin>
         </plugins>
       </build>
+    </profile>
+    <!-- The Spring Boot starter needs Java 17 (Spring Boot 3+), so it is only built on JDK 17 or newer. -->
+    <profile>
+      <id>jdk17plus</id>
+      <activation>
+        <jdk>[17,)</jdk>
+      </activation>
+      <modules>
+        <module>secure-spring-boot-starter</module>
+      </modules>
     </profile>
     <!-- On JDK 9+ use release=8 so accidental use of post-8 APIs fails the build. -->
     <profile>

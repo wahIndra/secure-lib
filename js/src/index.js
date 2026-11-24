@@ -40,4 +40,19 @@ export { securityHeaders, DEFAULT_CSP, LEAKY_HEADERS, CsrfTokenService } from '.
 export { forHtml, forHtmlAttribute, forJavaScript, forUrlComponent, forCssString, safeUrl } from './encode.js';
 export { SafeSql, safeCommand } from './safe.js';
 export { sanitizeForLog, maskSecrets, logError, publicErrorBody, PUBLIC_ERROR_MESSAGE } from './log.js';
-export { HttpRequestInspector, DEFAULT_HEADERS } from './http.js';
+export {
+  HttpRequestInspector,
+  DEFAULT_HEADERS,
+  DEFAULT_MAX_VALUES,
+  DEFAULT_MAX_INSPECTED_CHARS,
+  DEFAULT_MAX_DEPTH,
+} from './http.js';
+export {
+  RateLimiter,
+  CorsPolicy,
+  safeRedirect,
+  isSafeRedirect,
+  securityEvent,
+  emitSecurityEvent,
+  SecurityEventType,
+} from './api.js';

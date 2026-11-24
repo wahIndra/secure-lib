@@ -1,7 +1,7 @@
 {
   "name": "@wahindra/secure",
   "version": "0.1.0",
-  "description": "OWASP Top 10 prevention helpers for Node.js: injection detection, path traversal and access control guards, SSRF validation, password hashing, CSRF, security headers.",
+  "description": "OWASP Top 10 protection for Node.js: Express middleware (SQL injection, XSS, command injection, path traversal), IDOR guards with any OIDC provider, rate limiting, strict CORS, SSRF guard, password hashing, and a CLI to find vulnerable code and attack your local app.",
   "keywords": [
     "security",
     "owasp",
@@ -10,7 +10,13 @@
     "path-traversal",
     "ssrf",
     "access-control",
-    "csrf"
+    "csrf",
+    "idor",
+    "oidc",
+    "keycloak",
+    "rate-limit",
+    "express",
+    "security-scanner"
   ],
   "homepage": "https://github.com/wahIndra/secure-lib#readme",
   "bugs": {
@@ -49,7 +55,8 @@
     "devtools",
     "index.d.ts",
     "express.d.ts",
-    "devtools.d.ts"
+    "devtools.d.ts",
+    "README.md"
   ],
   "engines": {
     "node": ">=20"

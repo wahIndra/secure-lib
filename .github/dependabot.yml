@@ -25,6 +25,10 @@ updates:
         update-types: ["version-update:semver-major"]          # Servlet 6 needs Java 11
       - dependency-name: "javax.servlet:javax.servlet-api"
         update-types: ["version-update:semver-major"]          # javax is frozen at 4.x
+      # The starter compiles against the oldest supported Spring Boot line (3.5) on purpose;
+      # CI also tests it with Spring Boot 4 (ci.yml, job spring-boot-4).
+      - dependency-name: "org.springframework.boot:*"
+        update-types: ["version-update:semver-major"]
 
   # npm package in js/ (no runtime dependencies today; keeps future ones current).
   - package-ecosystem: npm

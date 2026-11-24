@@ -36,7 +36,7 @@ severity: MEDIUM
 owasp: INJECTION
 scope: raw
 flags: i
-pattern: (?<!\\)["'][^"']*\b(?:where|order\s+by|group\s+by|having|limit|offset|values\s*\()\s*(?:[\w.]+\s*(?:=|<>|!=|<|>|like|in)\s*)?\(?'?(?<!\\)["']\s*\+\s*[A-Za-z_]
+pattern: (?<!\\)["'][^"']*\b(?:where|order\s+by|group\s+by|having|values\s*\(|(?:select|from|where|by)\b[^"']*\b(?:limit|offset))\s*(?:[\w.]+\s*(?:=|<>|!=|<|>|like|in)\s*)?\(?'?(?<!\\)["']\s*\+\s*[A-Za-z_]
 unless: ["']\s*(?:select\s.*\sfrom\b|insert\s+into\b|update\s+\w+\s+set\b|delete\s+from\b|merge\s+into\b)
 message: SQL clause continued with a concatenated value
 fix: Bind the value as a parameter. For sort columns use SafeSql.allowlisted(...) and SafeSql.direction(...).
@@ -239,7 +239,7 @@ severity: HIGH
 owasp: BROKEN_ACCESS_CONTROL
 pattern: sendRedirect\s*\([^;]*(?:getParameter|getHeader)\s*\(|"redirect:"\s*\+|\bres\.redirect\s*\([^;]*req\.(?:query|body|params|headers)\b|\blocation\.(?:href|assign|replace)\b[^;]*(?:location\.search|location\.hash|URLSearchParams)
 message: Redirect target taken from request data (open redirect)
-fix: Redirect only to relative paths or an allowlist of hosts; reject absolute URLs from the user.
+fix: Use SafeRedirect.target(next, "/", "accounts.example.com") / safeRedirect(next, '/', ['accounts.example.com']): only relative paths or listed hosts.
 
 id: SSRF_JAVA
 lang: java
@@ -266,7 +266,7 @@ owasp: SECURITY_MISCONFIGURATION
 scope: raw
 pattern: @CrossOrigin\s*(?:\(\s*\))?\s*$|@CrossOrigin\s*\([^)]*origins\s*=\s*"\*"|(?:allowedOrigins|addAllowedOrigin|allowedOriginPatterns)\s*\(\s*"\*"|\borigin\s*:\s*(?:["']\*["']|true\b)|Access-Control-Allow-Origin["']?\s*,\s*["']\*
 message: CORS allows any origin
-fix: List the exact front-end origins that may call this API.
+fix: List the exact front-end origins: CorsPolicy.builder().allowOrigins("https://app.example.com") / new CorsPolicy({ allowOrigins: [...] }), or secure.cors.allowed-origins with the Spring Boot starter.
 
 id: SPRING_PERMIT_ALL
 lang: java
