@@ -62,11 +62,11 @@ public final class ClaimsPrincipal implements SecurityPrincipal {
         }
         Set<String> roles = new LinkedHashSet<String>();
         for (String path : mapping.getRoleClaims()) {
-            collect(claim(claims, path), roles);
+            collect(claim(claims, path), roles, false);
         }
         Set<String> permissions = new LinkedHashSet<String>();
         for (String path : mapping.getPermissionClaims()) {
-            collect(claim(claims, path), permissions);
+            collect(claim(claims, path), permissions, true);
         }
         String tenant = null;
         if (mapping.getTenantClaim() != null) {
@@ -107,25 +107,38 @@ public final class ClaimsPrincipal implements SecurityPrincipal {
         return current;
     }
 
-    /** Arrays and collections give one value per element; strings are split on spaces and commas. */
-    private static void collect(Object value, Set<String> out) {
-        if (value == null) {
-            return;
-        }
-        if (value instanceof Collection) {
-            for (Object v : (Collection<?>) value) {
-                collect(v, out);
-            }
-        } else if (value.getClass().isArray()) {
-            for (int i = 0; i < Array.getLength(value); i++) {
-                collect(Array.get(value, i), out);
-            }
-        } else if (value instanceof String) {
-            for (String s : ((String) value).split("[\\s,]+")) {
-                if (!s.isEmpty()) {
-                    out.add(s);
+    /**
+     * Each element of an array or collection is one value, taken whole: a group named "Team admin"
+     * must never grant the role "admin". Only a claim that is a single string is split, on spaces,
+     * and only for permission claims, because OAuth {@code scope} is space-delimited. A single
+     * string in a role claim is one role. Non-string elements are ignored.
+     */
+    private static void collect(Object value, Set<String> out, boolean spaceDelimitedString) {
+        if (value instanceof String) {
+            String s = ((String) value).trim();
+            if (spaceDelimitedString) {
+                for (String part : s.split("\\s+")) {
+                    if (!part.isEmpty()) {
+                        out.add(part);
+                    }
                 }
+            } else if (!s.isEmpty()) {
+                out.add(s);
             }
+        } else if (value instanceof Collection) {
+            for (Object v : (Collection<?>) value) {
+                addElement(v, out);
+            }
+        } else if (value != null && value.getClass().isArray()) {
+            for (int i = 0; i < Array.getLength(value); i++) {
+                addElement(Array.get(value, i), out);
+            }
+        }
+    }
+
+    private static void addElement(Object v, Set<String> out) {
+        if (v instanceof String && !((String) v).trim().isEmpty()) {
+            out.add(((String) v).trim());
         }
     }
 

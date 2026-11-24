@@ -119,13 +119,13 @@ public final class ClaimMapping {
             return this;
         }
 
-        /** Replaces the role claims. Values may be arrays or space/comma separated strings. */
+        /** Replaces the role claims. An array gives one role per element (never split); a single string is one role. */
         public Builder roleClaims(String... claims) {
             roleClaims = new ArrayList<String>(Arrays.asList(claims));
             return this;
         }
 
-        /** Replaces the permission / scope claims. Values may be arrays or space separated strings. */
+        /** Replaces the permission / scope claims. An array gives one permission per element; a single string is split on spaces (OAuth scope). */
         public Builder permissionClaims(String... claims) {
             permissionClaims = new ArrayList<String>(Arrays.asList(claims));
             return this;

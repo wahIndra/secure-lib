@@ -256,10 +256,20 @@ export function getClaim(claims, path) {
   return current;
 }
 
-function collect(value, out) {
-  if (value == null) return;
-  if (Array.isArray(value)) value.forEach((v) => collect(v, out));
-  else if (typeof value === 'string') value.split(/[\s,]+/).filter(Boolean).forEach((s) => out.add(s));
+/**
+ * Each array element is one value, taken whole: a group named "Team admin" must never grant the
+ * role "admin". Only a claim that is a single string is split, on spaces, and only for permission
+ * claims, because OAuth `scope` is space-delimited. A single string in a role claim is one role.
+ * Non-string elements are ignored.
+ */
+function collect(value, out, spaceDelimitedString) {
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (spaceDelimitedString) s.split(/\s+/).filter(Boolean).forEach((p) => out.add(p));
+    else if (s) out.add(s);
+  } else if (Array.isArray(value)) {
+    for (const v of value) if (typeof v === 'string' && v.trim()) out.add(v.trim());
+  }
 }
 
 /**
@@ -276,9 +286,9 @@ export function principalFromVerifiedClaims(claims, claimMapping = DEFAULT_MAPPI
   const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId).trim() : '';
   if (!id) throw new AccessDeniedError(`token has no '${claimMapping.idClaim}' claim`, true);
   const roles = new Set();
-  for (const p of claimMapping.roleClaims) collect(getClaim(claims, p), roles);
+  for (const p of claimMapping.roleClaims) collect(getClaim(claims, p), roles, false);
   const permissions = new Set();
-  for (const p of claimMapping.permissionClaims) collect(getClaim(claims, p), permissions);
+  for (const p of claimMapping.permissionClaims) collect(getClaim(claims, p), permissions, true);
   const t = claimMapping.tenantClaim ? getClaim(claims, claimMapping.tenantClaim) : null;
   const tenantId = typeof t === 'string' || typeof t === 'number' ? String(t) : null;
   return Object.freeze({ id, roles, permissions, tenantId, claims: Object.freeze({ ...claims }) });

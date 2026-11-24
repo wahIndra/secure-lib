@@ -80,9 +80,25 @@ class ClaimsPrincipalTest {
         assertTrue(cognito.getRoles().contains("admins"));
         assertTrue(cognito.getPermissions().contains("orders/read"));
 
-        ClaimsPrincipal std = ClaimsPrincipal.fromVerifiedClaims(map("sub", 42, "roles", "a, b"), ClaimMapping.standard());
+        ClaimsPrincipal std = ClaimsPrincipal.fromVerifiedClaims(map("sub", 42, "roles", "auditor"), ClaimMapping.standard());
         assertEquals("42", std.getId());
-        assertEquals(new LinkedHashSet<String>(Arrays.asList("a", "b")), std.getRoles());
+        assertEquals(Collections.singleton("auditor"), std.getRoles());
+    }
+
+    /** Group and role names can contain spaces or commas; splitting them would grant roles. */
+    @Test
+    void roleNamesAreNeverSplit() {
+        ClaimsPrincipal p = ClaimsPrincipal.fromVerifiedClaims(map(
+                "sub", "u1",
+                "groups", Arrays.asList("Team admin", "Viewers, admin", " editors ", 7),
+                "roles", "Support admin",
+                "scope", "orders:read  orders:write",
+                "permissions", Arrays.asList("read orders")), ClaimMapping.standard());
+        assertEquals(new LinkedHashSet<String>(Arrays.asList("Support admin", "Team admin", "Viewers, admin", "editors")), p.getRoles());
+        assertTrue(!p.getRoles().contains("admin"));
+        // A scope string is space-delimited (OAuth); array elements stay whole.
+        assertEquals(new LinkedHashSet<String>(Arrays.asList("orders:read", "orders:write", "read orders")), p.getPermissions());
+        assertThrows(AccessDeniedException.class, () -> AccessGuard.requireAnyRole(p, "admin"));
     }
 
     @Test

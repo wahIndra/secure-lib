@@ -348,6 +348,9 @@ app.get('/api/orders/:id', async (req, res) => {
 - Querying by both keys, as in `findByIdAndOwnerId(id, user.getId())`, is better still: other users' records are never loaded, and the response is a 404 that doesn't reveal the record exists.
 - Admin endpoints that take a user id on purpose must require a role. The scanner rule skips files with role checks such as `@PreAuthorize` or `requireAnyRole`.
 - If one backend accepts tokens from several issuers, ids can collide. Use one mapping per issuer, or store `iss + "|" + sub`.
+- Roles are read exactly as named. Each array element is one role, and a group called
+  `Team admin` never grants `admin`. Only a permission claim that is a single string (OAuth
+  `scope`) is split, on spaces.
 
 **Check it manually** against your local app, with two users' tokens (or session cookies, or API keys):
 
@@ -637,8 +640,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 337 passed, 1 skipped\* | 82.1% | 67.4% |
-| JavaScript (`node --experimental-test-coverage`) | 72 passed | 91.6% | 80.8% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 338 passed, 1 skipped\* | 82.1% | 67.4% |
+| JavaScript (`node --experimental-test-coverage`) | 73 passed | 91.6% | 80.8% |
 | Java servlet filter modules | none yet | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or

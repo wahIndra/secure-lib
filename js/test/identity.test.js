@@ -42,12 +42,27 @@ test('Auth0 namespaced claim, Okta, Cognito, standard and custom', () => {
   assert.ok(auth0.roles.has('admin') && auth0.permissions.has('read:orders'));
   assert.ok(principalFromVerifiedClaims({ sub: '00u1', groups: ['Admins'] }, ClaimMappings.okta()).roles.has('Admins'));
   assert.ok(principalFromVerifiedClaims({ sub: 'c0g', 'cognito:groups': ['admins'] }, ClaimMappings.cognito()).roles.has('admins'));
-  const std = principalFromVerifiedClaims({ sub: 42, roles: 'a, b' });
+  const std = principalFromVerifiedClaims({ sub: 42, roles: 'auditor' });
   assert.equal(std.id, '42');
-  assert.deepEqual([...std.roles], ['a', 'b']);
+  assert.deepEqual([...std.roles], ['auditor']);
   const org = principalFromVerifiedClaims({ ...KEYCLOAK, org: { id: 'acme' } }, ClaimMappings.keycloak({ clientId: 'orders-api', tenantClaim: 'org.id' }));
   assert.equal(org.tenantId, 'acme');
   assert.equal(principalFromVerifiedClaims({ uid: 'u1' }, ClaimMappings.custom({ idClaim: 'uid' })).id, 'u1');
+});
+
+test('role names are never split (a group "Team admin" must not grant "admin")', () => {
+  const p = principalFromVerifiedClaims({
+    sub: 'u1',
+    groups: ['Team admin', 'Viewers, admin', ' editors ', 7],
+    roles: 'Support admin',
+    scope: 'orders:read  orders:write',
+    permissions: ['read orders'],
+  });
+  assert.deepEqual([...p.roles].sort(), ['Support admin', 'Team admin', 'Viewers, admin', 'editors']);
+  assert.equal(p.roles.has('admin'), false);
+  // A scope string is space-delimited (OAuth); array elements stay whole.
+  assert.deepEqual([...p.permissions].sort(), ['orders:read', 'orders:write', 'read orders']);
+  assert.throws(() => AccessGuard.requireAnyRole(p, 'admin'), AccessDeniedError);
 });
 
 test('missing subject is unauthenticated; prototype keys are never read', () => {
