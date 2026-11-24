@@ -7,16 +7,20 @@ version on `main`.
 
 ```bash
 git checkout main && git pull
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
 ```
+
+Released so far: **0.1.0** (2026-11-24). Pick the next version by
+[semantic versioning](https://semver.org): patch for fixes, minor for new features, major for
+breaking changes.
 
 `.github/workflows/release.yml` then:
 
 1. checks that the tag is on `main` and has the form `vX.Y.Z`,
 2. runs the full CI suite (every JDK and Node version, self-scan, Java/JS parity),
 3. sets the version from the tag, signs and uploads to Maven Central, waits until it is published,
-4. publishes `@wahindra/secure` to npm with provenance,
+4. publishes `@wahindra/secure` to npm through **trusted publishing** (no token; provenance attached),
 5. creates the GitHub release with install snippets and `secure-core-X.Y.Z.jar`.
 
 If any step fails, nothing later runs. Maven Central and npm releases cannot be overwritten
@@ -63,15 +67,31 @@ keys.openpgp.org sends a confirmation email for the address on the key only if i
 mail. A noreply address can't, so the key is published without the user ID. Central only needs
 the key itself. To list your address on the key server, use a key with a real mailbox.
 
-### 3. npm
+### 3. npm (trusted publishing)
 
-1. Create an npm account named `wahindra` (the package scope is `@wahindra`), or change `name`
-   in `js/package.json` to a scope you own.
-2. *Access Tokens → Generate New Token → Granular*, with read and write access to packages, limited to
-   `@wahindra/secure` once it exists (the first publish needs "all packages" or a classic
-   *Automation* token).
-3. Optional, recommended after the first release: on npmjs.com, add this repository as a
-   **trusted publisher** for the package. Then the token can be removed.
+The workflow publishes to npm without any token: npm trusts this repository's `release.yml`
+running in the `release` environment, and checks that through GitHub's OIDC identity.
+
+1. The npm account `wahindra` owns the `@wahindra` scope and **must have two-factor
+   authentication enabled**. npm refuses every publish from an account without it, by token
+   or by hand, with `403 ... Two-factor authentication ... is required`.
+2. On npmjs.com open **@wahindra/secure → Settings → Trusted Publisher → GitHub Actions**:
+
+   | Field | Value |
+   |---|---|
+   | Organization or user | `wahIndra` |
+   | Repository | `secure-lib` |
+   | Workflow filename | `release.yml` |
+   | Environment | `release` |
+
+3. On the same page, set **Publishing access** to *Require two-factor authentication and
+   disallow tokens*. Trusted publishing keeps working, since it doesn't use a token, and a
+   leaked token can no longer publish.
+
+**Brand-new packages:** trusted publishing can only be configured after a package exists, so
+the very first version of a new package has to be published by hand (`npm login`, then
+`npm publish --access public` from a checkout of the tag, answering the 2FA prompt).
+`@wahindra/secure` 0.1.0 was published this way; later versions come from the workflow.
 
 ### 4. Repository secrets
 
@@ -83,7 +103,9 @@ the key itself. To list your address on the key server, use a key with a real ma
 | `MAVEN_CENTRAL_PASSWORD` | token password from step 1 |
 | `MAVEN_GPG_PRIVATE_KEY` | full contents of `private-key.asc`, including the BEGIN/END lines |
 | `MAVEN_GPG_PASSPHRASE` | passphrase of that key |
-| `NPM_TOKEN` | token from step 3 |
+
+npm needs no secret (see step 3). If an old `NPM_TOKEN` secret is still listed, delete it, and
+revoke the token on npmjs.com.
 
 The publish jobs run in a GitHub **environment** named `release`, which GitHub creates on first
 use. Under *Settings → Environments → release* you can add **required reviewers**, so every
@@ -97,4 +119,5 @@ cd java && mvn -Prelease -Dgpg.skip verify   # sources + javadoc jars build, jav
 cd ../js && npm publish --dry-run            # package contents; must print no "auto-corrected" warning
 ```
 
-After the first release, update the version shown in the README dependency snippets.
+After each release, update the version shown in the README install snippets
+(`grep -n "0\.1\.0" README.md`).

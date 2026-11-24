@@ -1,17 +1,25 @@
 # secure-lib
 
 [![CI](https://github.com/wahIndra/secure-lib/actions/workflows/ci.yml/badge.svg)](https://github.com/wahIndra/secure-lib/actions/workflows/ci.yml)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.wahindra/secure-core?label=maven%20central)](https://central.sonatype.com/namespace/io.github.wahindra)
+[![npm](https://img.shields.io/npm/v/@wahindra/secure)](https://www.npmjs.com/package/@wahindra/secure)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Java 8+](https://img.shields.io/badge/java-8%2B-orange)
 ![Node 20+](https://img.shields.io/badge/node-20%2B-green)
 
 OWASP Top 10 prevention helpers for **Java 8+** and **Node.js 20+**, with zero runtime dependencies.
 
+```xml
+<!-- Maven: Spring Boot 3 / Jakarta EE (see Install below for other stacks) -->
+<dependency>
+  <groupId>io.github.wahindra</groupId>
+  <artifactId>secure-servlet-jakarta</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
 ```bash
-git clone https://github.com/wahIndra/secure-lib.git
-cd secure-lib
-(cd java && mvn install)   # Java: jars in ~/.m2, CLI jar in java/secure-core/target/
-(cd js && npm test)        # Node: no dependencies to install
+npm install @wahindra/secure       # Node.js
 ```
 
 The library has two layers:
@@ -83,16 +91,9 @@ not affect it.
 
 ### Install
 
-> **Not on Maven Central yet.** No release has been published, so for now another project can
-> only resolve the dependency after you build it into your local Maven repository:
->
-> ```bash
-> git clone https://github.com/wahIndra/secure-lib.git
-> cd secure-lib/java && mvn install      # JDK 8 or newer; installs 0.1.0-SNAPSHOT into ~/.m2
-> ```
->
-> CI servers and teammates need the same step. After the first release (see
-> [RELEASING.md](RELEASING.md)) use the released version, e.g. `0.1.0`, with no extra setup.
+Published on Maven Central under `io.github.wahindra`, so no extra repository setup is needed.
+Every artifact ships with sources and javadoc, and is signed with key
+`286896860735D5B2D1A5645E36C71148C2C4FFFE`.
 
 | Your stack | artifactId |
 |---|---|
@@ -104,12 +105,14 @@ not affect it.
 <dependency>
   <groupId>io.github.wahindra</groupId>
   <artifactId>secure-servlet-jakarta</artifactId>
-  <version>0.1.0-SNAPSHOT</version> <!-- local build; use the released version once published -->
+  <version>0.1.0</version>
 </dependency>
 ```
 
-Gradle: `implementation("io.github.wahindra:secure-servlet-jakarta:0.1.0-SNAPSHOT")`, with
-`mavenLocal()` in `repositories` until the first release.
+Gradle: `implementation("io.github.wahindra:secure-servlet-jakarta:0.1.0")`.
+
+Unreleased changes on `main` are available as `0.1.0-SNAPSHOT` after `mvn install` from a
+clone (local Maven repository only).
 
 ### Build and test
 
@@ -217,9 +220,11 @@ if (r.isMalicious()) { /* reject; log r.getFindings() */ }
 
 ## How to use: JavaScript
 
-> **Not on npm yet.** Until the first release, install from a local checkout:
-> `npm install /path/to/secure-lib/js`, or build a tarball with `cd js && npm pack` and install that.
-> After the release: `npm install @wahindra/secure`.
+```bash
+npm install @wahindra/secure
+```
+
+ESM only, Node.js 20+, no dependencies, TypeScript types included. To work on the library itself:
 
 ```bash
 cd js
@@ -277,13 +282,14 @@ and payloads (`devtools/probe-payloads.txt`).
 | Investigating a blocked request | `secure check` | Shows how the filter decodes a value and which rules match |
 
 ```bash
-# Java (any JDK 8+). The jar has no dependencies; after `mvn install` it is at
-# java/secure-core/target/secure-core-0.1.0-SNAPSHOT.jar (and in ~/.m2/repository/io/github/wahindra/secure-core/)
-java -jar secure-core-0.1.0-SNAPSHOT.jar scan src/
-java -jar secure-core-0.1.0-SNAPSHOT.jar check "1;SELECT pg_sleep(5)--"
-java -jar secure-core-0.1.0-SNAPSHOT.jar probe "http://localhost:8080/api/orders?id=FUZZ"
+# Java (any JDK 8+). The jar has no dependencies: download secure-core-0.1.0.jar from the
+# GitHub release, or from Maven Central:
+curl -LO https://repo1.maven.org/maven2/io/github/wahindra/secure-core/0.1.0/secure-core-0.1.0.jar
+java -jar secure-core-0.1.0.jar scan src/
+java -jar secure-core-0.1.0.jar check "1;SELECT pg_sleep(5)--"
+java -jar secure-core-0.1.0.jar probe "http://localhost:8080/api/orders?id=FUZZ"
 
-# Node (npm install --save-dev @wahindra/secure once released; until then from a local checkout)
+# Node (npm install --save-dev @wahindra/secure, or run without installing: npx @wahindra/secure scan src/)
 npx secure scan src/
 npx secure check "1;SELECT pg_sleep(5)--"
 npx secure probe "http://localhost:3000/search?q=FUZZ"
@@ -639,9 +645,9 @@ that would drop Java 8 support (JUnit 6, Jakarta Servlet 6) are excluded. Raise 
 Java version first if you want them.
 
 `.github/workflows/release.yml` runs when a `vX.Y.Z` tag is pushed. It checks that the tag is
-on `main`, runs the whole CI suite above, then publishes to Maven Central and npm, and creates a
-GitHub release with the CLI jar attached. It needs repository secrets that only the owner can
-create; see [RELEASING.md](RELEASING.md).
+on `main`, runs the whole CI suite above, then publishes to Maven Central (signed, using
+repository secrets) and to npm (trusted publishing: no token, provenance attached), and creates a
+GitHub release with the CLI jar attached. See [RELEASING.md](RELEASING.md).
 
 ## Rolling it out
 

@@ -156,10 +156,13 @@ jobs:
       && (needs.ci.result == 'success' || needs.ci.result == 'skipped')
       && (github.event_name == 'push' || inputs.npm)
     runs-on: ubuntu-latest
+    # Must match the environment configured as the trusted publisher on npmjs.com.
     environment: release
     permissions:
       contents: read
-      id-token: write   # npm provenance: links the published package to this workflow run
+      # Trusted publishing: npm exchanges this run's OIDC token for a short-lived publish
+      # credential. No npm token is stored anywhere; provenance is attached automatically.
+      id-token: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
     defaults:
@@ -175,24 +178,25 @@ jobs:
           SHA: ${{ needs.version.outputs.sha }}
         run: '[ "$(git rev-parse HEAD)" = "$SHA" ] || { echo "::error::checked out $(git rev-parse HEAD), expected $SHA"; exit 1; }'
 
+      # No registry-url: that would write an .npmrc with a token placeholder. npm publishes to
+      # registry.npmjs.org by default and authenticates through OIDC.
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          registry-url: https://registry.npmjs.org
 
-      - name: Check secrets
-        env:
-          T: ${{ secrets.NPM_TOKEN }}
-        run: '[ -n "$T" ] || { echo "::error::Missing repository secret NPM_TOKEN (see RELEASING.md)"; exit 1; }'
+      - name: Check npm supports trusted publishing (11.5.1+)
+        run: |
+          v=$(npm -v)
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$v" \
+            || { echo "::error::npm $v is too old for trusted publishing (needs 11.5.1+)"; exit 1; }
+          echo "npm $v"
 
       - name: Set version
         # --allow-same-version: package.json may already carry the release version.
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public
 
   github-release:
     name: GitHub release
