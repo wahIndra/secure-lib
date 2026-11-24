@@ -56,7 +56,9 @@ test-vectors/             shared payloads, crypto fixtures and scanner fixtures 
 docs/OWASP-MAPPING.md     what covers each Top 10 category
 .github/
   workflows/ci.yml        build + test matrix, self-scan, Java/JS parity check
+  workflows/release.yml   on a vX.Y.Z tag: CI, then Maven Central + npm + GitHub release
   dependabot.yml          weekly Maven, npm and GitHub Actions updates
+RELEASING.md              how to cut a release and the one-time account setup
 ```
 
 ## Compatibility
@@ -79,22 +81,43 @@ not affect it.
 
 ## How to use: Java
 
-### Build
+### Install
 
-```bash
-cd java
-mvn install                 # JDK 8 or newer
-mvn -Pcoverage verify       # same, plus a JaCoCo report in secure-core/target/site/jacoco/
-```
+> **Not on Maven Central yet.** No release has been published, so for now another project can
+> only resolve the dependency after you build it into your local Maven repository:
+>
+> ```bash
+> git clone https://github.com/wahIndra/secure-lib.git
+> cd secure-lib/java && mvn install      # JDK 8 or newer; installs 0.1.0-SNAPSHOT into ~/.m2
+> ```
+>
+> CI servers and teammates need the same step. After the first release (see
+> [RELEASING.md](RELEASING.md)) use the released version, e.g. `0.1.0`, with no extra setup.
+
+| Your stack | artifactId |
+|---|---|
+| Spring Boot 3, Jakarta EE 9+, Tomcat 10+ | `secure-servlet-jakarta` |
+| Spring Boot 2, Java EE 8, Tomcat 9 | `secure-servlet-javax` |
+| Guards and detectors only (no servlet) | `secure-core` |
 
 ```xml
-<!-- Spring Boot 3 / Jakarta EE 9+ -->
 <dependency>
   <groupId>io.github.wahindra</groupId>
   <artifactId>secure-servlet-jakarta</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0-SNAPSHOT</version> <!-- local build; use the released version once published -->
 </dependency>
-<!-- Spring Boot 2 / Java EE: secure-servlet-javax. Guards only, no servlet: secure-core. -->
+```
+
+Gradle: `implementation("io.github.wahindra:secure-servlet-jakarta:0.1.0-SNAPSHOT")`, with
+`mavenLocal()` in `repositories` until the first release.
+
+### Build and test
+
+```bash
+cd java
+mvn verify                  # JDK 8 or newer
+mvn -Pcoverage verify       # same, plus a JaCoCo report in secure-core/target/site/jacoco/
+mvn -Prelease -Dgpg.skip verify   # also builds the sources and javadoc jars Maven Central requires
 ```
 
 ### 1. Request filter (detection + security headers)
@@ -194,6 +217,10 @@ if (r.isMalicious()) { /* reject; log r.getFindings() */ }
 
 ## How to use: JavaScript
 
+> **Not on npm yet.** Until the first release, install from a local checkout:
+> `npm install /path/to/secure-lib/js`, or build a tarball with `cd js && npm pack` and install that.
+> After the release: `npm install @wahindra/secure`.
+
 ```bash
 cd js
 npm test            # npm run coverage / npm run bench
@@ -256,7 +283,7 @@ java -jar secure-core-0.1.0-SNAPSHOT.jar scan src/
 java -jar secure-core-0.1.0-SNAPSHOT.jar check "1;SELECT pg_sleep(5)--"
 java -jar secure-core-0.1.0-SNAPSHOT.jar probe "http://localhost:8080/api/orders?id=FUZZ"
 
-# Node (npm install --save-dev @wahindra/secure)
+# Node (npm install --save-dev @wahindra/secure once released; until then from a local checkout)
 npx secure scan src/
 npx secure check "1;SELECT pg_sleep(5)--"
 npx secure probe "http://localhost:3000/search?q=FUZZ"
@@ -603,13 +630,18 @@ rescan the input from every position are bounded, and normalization skips work f
 | Job | What it checks |
 |---|---|
 | **Java** | `mvn verify` on Temurin 8, 11, 17, 21 and 25 (Linux) and 21 (Windows). Java 21 also produces the JaCoCo report (downloadable artifact `jacoco-report`). Surefire reports are uploaded when a job fails. |
-| **Node** | `npm test` on Node 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage and checks that the npm package contains the CLI and the shared rule files. |
+| **Node** | `npm test` on Node 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, and fails if npm would rewrite `package.json` at publish time. |
 | **Security scan** | The repository scans itself with `secure scan`. Results appear under *Security → Code scanning* (SARIF), and the job fails on any HIGH finding. |
 | **Java and JavaScript agree** | Both CLIs scan the shared fixtures, and `.github/scripts/compare-scanners.mjs` fails if their findings differ. |
 
 `.github/dependabot.yml` opens weekly update PRs for Maven, npm and GitHub Actions. Updates
 that would drop Java 8 support (JUnit 6, Jakarta Servlet 6) are excluded. Raise the minimum
 Java version first if you want them.
+
+`.github/workflows/release.yml` runs when a `vX.Y.Z` tag is pushed. It checks that the tag is
+on `main`, runs the whole CI suite above, then publishes to Maven Central and npm, and creates a
+GitHub release with the CLI jar attached. It needs repository secrets that only the owner can
+create; see [RELEASING.md](RELEASING.md).
 
 ## Rolling it out
 

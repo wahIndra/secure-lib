@@ -41,7 +41,7 @@
     }
   },
   "bin": {
-    "secure": "./bin/secure.js"
+    "secure": "bin/secure.js"
   },
   "files": [
     "src",
