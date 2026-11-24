@@ -22,6 +22,20 @@ git push origin v0.1.0
 If any step fails, nothing later runs. Maven Central and npm releases cannot be overwritten
 or deleted. To fix a bad release, tag the next patch version.
 
+### If only one registry failed
+
+Don't move or re-create the tag. The registry that succeeded already has that version, and
+neither registry accepts the same version twice. Instead, open **Actions → Release → Run workflow**
+on `main` and enter:
+
+- **tag**: the existing tag, e.g. `v0.1.0`
+- **Publish to Maven Central**: off if that version is already on Central
+- **Publish to npm**: off if that version is already on npm
+
+The code is still built from the tag; only the workflow file comes from `main`, so a fix to the
+workflow itself takes effect. CI is not re-run, because the tag already passed it when it was
+pushed. The GitHub release is created, or its jar updated, once the publishing you selected succeeds.
+
 ## One-time setup
 
 Nothing below can be done from the repository. Each step uses your own accounts.

@@ -1,16 +1,34 @@
 name: Release
 
 # Push a tag such as v0.1.0 (see RELEASING.md). The tag is the single source of the version:
-# the POMs and package.json keep a -SNAPSHOT / development version on main.
+# the POMs keep a -SNAPSHOT version and package.json a development version on main.
+#
+# "Run workflow" (workflow_dispatch) re-publishes an existing tag, e.g. to finish a release where
+# one registry failed. The code is always built from the tag; only this workflow file comes from
+# the branch it is started on. Maven Central and npm never accept the same version twice, so turn
+# off whichever registry already has it.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, e.g. v0.1.0"
+        required: true
+      maven:
+        description: "Publish to Maven Central (off if this version is already there)"
+        type: boolean
+        default: true
+      npm:
+        description: "Publish to npm (off if this version is already there)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -18,28 +36,42 @@ jobs:
     name: Read version from tag
     runs-on: ubuntu-latest
     outputs:
+      tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - id: v
         name: Check tag
         shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          # Releases are cut from main only.
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::Tag $GITHUB_REF_NAME points to a commit that is not on main."
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a release tag of the form vX.Y.Z."
             exit 1
           fi
-          echo "Releasing $VERSION from $GITHUB_SHA"
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG does not exist."
+            exit 1
+          fi
+          # Releases are cut from main only.
+          if ! git merge-base --is-ancestor "refs/tags/$TAG" origin/main; then
+            echo "::error::Tag $TAG points to a commit that is not on main."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG#v} from $(git rev-parse "refs/tags/$TAG^{commit}")"
 
   ci:
     name: CI
     needs: version
+    # A tag push runs the full suite. A manual re-publish uses a tag whose push already passed it.
+    if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -48,12 +80,18 @@ jobs:
   maven-central:
     name: Publish to Maven Central
     needs: [version, ci]
+    if: >-
+      !cancelled() && needs.version.result == 'success'
+      && (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+      && (github.event_name == 'push' || inputs.maven)
     runs-on: ubuntu-latest
     environment: release
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - uses: actions/setup-java@v6
         with:
@@ -96,16 +134,13 @@ jobs:
         # Tests already passed in the ci job, on every supported JDK.
         run: mvn -B -ntp -Prelease -DskipTests deploy
 
-      - name: Keep the CLI jar for the GitHub release
-        uses: actions/upload-artifact@v7
-        with:
-          name: cli-jar
-          path: java/secure-core/target/secure-core-${{ env.VERSION }}.jar
-          if-no-files-found: error
-
   npm:
     name: Publish to npm
     needs: [version, ci]
+    if: >-
+      !cancelled() && needs.version.result == 'success'
+      && (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+      && (github.event_name == 'push' || inputs.npm)
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -118,6 +153,8 @@ jobs:
         working-directory: js
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - uses: actions/setup-node@v7
         with:
@@ -130,7 +167,8 @@ jobs:
         run: '[ -n "$T" ] || { echo "::error::Missing repository secret NPM_TOKEN (see RELEASING.md)"; exit 1; }'
 
       - name: Set version
-        run: npm version "$VERSION" --no-git-tag-version
+        # --allow-same-version: package.json may already carry the release version.
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish
         env:
@@ -140,19 +178,36 @@ jobs:
   github-release:
     name: GitHub release
     needs: [version, maven-central, npm]
+    # Runs when every publish job that was asked for succeeded.
+    if: >-
+      !cancelled() && needs.version.result == 'success'
+      && (needs.maven-central.result == 'success' || needs.maven-central.result == 'skipped')
+      && (needs.npm.result == 'success' || needs.npm.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
+      TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v7
         with:
-          name: cli-jar
+          ref: ${{ needs.version.outputs.tag }}
 
-      - name: Create release
+      # Taking the jar from Maven Central (not from this run's build) also proves it is published.
+      - name: Download the CLI jar from Maven Central
+        run: |
+          URL="https://repo1.maven.org/maven2/io/github/wahindra/secure-core/${VERSION}/secure-core-${VERSION}.jar"
+          for i in $(seq 1 60); do
+            if curl -fsSL -o "secure-core-${VERSION}.jar" "$URL"; then
+              echo "downloaded $URL"; exit 0
+            fi
+            echo "not on Maven Central yet (attempt $i/60), waiting 30 s"; sleep 30
+          done
+          echo "::error::secure-core ${VERSION} did not appear on Maven Central within 30 minutes."
+          exit 1
+
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -171,5 +226,9 @@ jobs:
 
           **CLI**: \`java -jar secure-core-${VERSION}.jar scan src/\` (attached below, Java 8+).
           EOF
-          gh release create "$GITHUB_REF_NAME" "secure-core-${VERSION}.jar" \
-            --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "secure-core-${VERSION}.jar" --clobber
+          else
+            gh release create "$TAG" "secure-core-${VERSION}.jar" \
+              --title "$TAG" --notes-file notes.md --generate-notes --verify-tag
+          fi
