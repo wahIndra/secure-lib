@@ -22,6 +22,11 @@ is published to Maven Central (`io.github.wahindra:*`) and npm (`@wahindra/secur
 - **Spring Boot**: `secure.audit.file.*` and `secure.audit.syslog.*`; the audit log is on as soon as a
   path or host is set, or an `AuditSink` bean exists.
 
+- **Supply-chain check in CI**: CycloneDX SBOMs of the published jars and of the whole build, scanned
+  with OSV-Scanner. CI fails if the published code gains a third-party runtime dependency or a known
+  vulnerability; advisories in build and test dependencies are reported. The SBOMs are kept as a
+  build artifact.
+
 ### Changed
 - **Node.js 18+** for `@wahindra/secure` (was 20+). CI now also runs the tests on Node 18.
 

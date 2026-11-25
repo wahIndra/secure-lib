@@ -25,6 +25,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.time.Instant;
@@ -251,6 +252,74 @@ class AuditTest {
                 second.close();
             }
         }
+    }
+
+    /**
+     * TLS: a server whose certificate the client trusts gets the message; with the default trust
+     * store (which does not know this self-signed certificate) the handshake fails, so nothing is sent.
+     * The certificate is created for this test only, with the JDK's keytool.
+     */
+    @Test
+    void syslogOverTlsVerifiesTheServerCertificate() throws Exception {
+        Path ks = dir.resolve("server.p12");
+        char[] pw = "test-only-keystore".toCharArray();
+        String keytool = Paths.get(System.getProperty("java.home"), "bin", isWindows() ? "keytool.exe" : "keytool").toString();
+        if (!Files.exists(Paths.get(keytool))) {
+            keytool = Paths.get(System.getProperty("java.home"), "..", "bin", isWindows() ? "keytool.exe" : "keytool").toString();
+        }
+        Process p = new ProcessBuilder(keytool, "-genkeypair", "-alias", "syslog", "-keyalg", "RSA", "-keysize", "2048",
+                "-validity", "2", "-dname", "CN=localhost", "-ext", "SAN=ip:127.0.0.1,dns:localhost",
+                "-storetype", "PKCS12", "-keystore", ks.toString(), "-storepass", new String(pw), "-keypass", new String(pw))
+                .redirectErrorStream(true).start();
+        assertTrue(p.waitFor(60, TimeUnit.SECONDS) && p.exitValue() == 0, "keytool failed");
+
+        java.security.KeyStore store = java.security.KeyStore.getInstance("PKCS12");
+        try (InputStream in = Files.newInputStream(ks)) {
+            store.load(in, pw);
+        }
+        javax.net.ssl.KeyManagerFactory kmf = javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(store, pw);
+        javax.net.ssl.SSLContext serverCtx = javax.net.ssl.SSLContext.getInstance("TLS");
+        serverCtx.init(kmf.getKeyManagers(), null, null);
+        javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(store);
+        javax.net.ssl.SSLContext clientCtx = javax.net.ssl.SSLContext.getInstance("TLS");
+        clientCtx.init(null, tmf.getTrustManagers(), null);
+
+        try (javax.net.ssl.SSLServerSocket server = (javax.net.ssl.SSLServerSocket) serverCtx.getServerSocketFactory()
+                .createServerSocket(0, 5, InetAddress.getLoopbackAddress())) {
+            server.setSoTimeout(10000);
+            List<String> got = Collections.synchronizedList(new ArrayList<String>());
+            Thread acceptor = new Thread(() -> {
+                for (int i = 0; i < 2; i++) {
+                    try (Socket s = server.accept()) {
+                        got.add(readFrame(s.getInputStream()));
+                    } catch (IOException ignored) {
+                        // the untrusted client aborts its handshake
+                    }
+                }
+            });
+            acceptor.start();
+
+            try (SyslogAuditSink untrusting = SyslogAuditSink.builder("127.0.0.1", server.getLocalPort())
+                    .protocol(SyslogAuditSink.Protocol.TLS).build()) {
+                assertThrows(IOException.class, () -> untrusting.write(rec("must-not-arrive")));
+            }
+            try (SyslogAuditSink trusting = SyslogAuditSink.builder("127.0.0.1", server.getLocalPort())
+                    .protocol(SyslogAuditSink.Protocol.TLS).format(AuditFormat.JSON)
+                    .sslSocketFactory(clientCtx.getSocketFactory()).build()) {
+                trusting.write(rec("over-tls"));
+                // Stay connected until the server has read it (TLS 1.3 sends a session ticket after
+                // the handshake; closing at once would make the server's read fail).
+                acceptor.join(15000);
+            }
+            assertEquals(1, got.size(), got.toString());
+            assertTrue(got.get(0).contains("\"event\":\"over-tls\""), got.get(0));
+        }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
     /** Reads one octet-counted frame: "LEN SP MSG". */

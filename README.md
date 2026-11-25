@@ -839,7 +839,7 @@ is in [docs/OWASP-MAPPING.md](docs/OWASP-MAPPING.md).
 |---|---|---|
 | A01 | Broken Access Control (incl. SSRF) | route policy, ownership/tenant/mass-assignment guards, identity from verified tokens, `secure idor`, path traversal guard + detector, CSRF, strict CORS, safe redirects, SSRF URL guard |
 | A02 | Security Misconfiguration | security headers, leaky-header list, filter/middleware, Spring Boot starter defaults |
-| A03 | Software Supply Chain Failures | zero dependencies; run OWASP Dependency-Check / `npm audit` in CI (build-time concern) |
+| A03 | Software Supply Chain Failures | zero runtime dependencies, enforced in CI with SBOMs (CycloneDX) and OSV-Scanner; npm publishes with provenance |
 | A04 | Cryptographic Failures | PBKDF2 password hashing, secure tokens, constant-time compare, HMAC |
 | A05 | Injection | SQLi / XSS / command / JNDI / EL / SSTI detectors, `SafeSql`, `SafeCommand`, output encoders |
 | A06 | Insecure Design | API rate limiting, login throttling, deny-by-default, per-request inspection budget |
@@ -889,8 +889,8 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 386 passed, 1 skipped\* | 84.7% | 70.6% |
-| JavaScript (`node --experimental-test-coverage`) | 95 passed | 93.6% | 83.0% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 387 passed, 1 skipped\* | 84.7% | 70.6% |
+| JavaScript (`node --experimental-test-coverage`) | 96 passed | 93.6% | 83.0% |
 | Java servlet filters (javax, jakarta) | 8 + 8 passed | not measured | not measured |
 | Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 10 passed on each | not measured | not measured |
 
@@ -997,6 +997,7 @@ rescan the input from every position are bounded, and normalization skips work f
 | **Node** | `npm test` on Node 18, 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, type-checks the TypeScript definitions, and fails if npm would rewrite `package.json` at publish time. |
 | **Spring Boot 4 starter** | The starter's end-to-end tests again, against Spring Boot 4.2 (`-Dspring-boot.version=4.2.0`). |
 | **Security scan** | The repository scans itself with `secure scan`. Results appear under *Security → Code scanning* (SARIF), and the job fails on any HIGH finding. |
+| **Supply chain** | Builds two CycloneDX SBOMs: what the published jars bring to users, and everything the build uses. It scans both with [OSV-Scanner](https://google.github.io/osv-scanner/) (pinned version), then fails if the published code has any third-party runtime dependency or any known vulnerability, or if `package.json` gains a dependency. Advisories in build and test dependencies are listed as a notice. The SBOMs are uploaded as the `sbom` artifact. |
 | **Java and JavaScript agree** | Both CLIs scan the shared fixtures, and `.github/scripts/compare-scanners.mjs` fails if their findings differ. |
 
 `.github/dependabot.yml` opens weekly update PRs for Maven, npm and GitHub Actions. Updates
@@ -1046,5 +1047,11 @@ GitHub release with the CLI jar attached. See [RELEASING.md](RELEASING.md).
   instances for accounts and IPs so flooding one cannot push entries out of the other.
 - The Spring Boot starter supports servlet (Spring MVC) applications. WebFlux (reactive) apps
   can use `SecurityFilterEngine` directly, but have no auto-configuration yet.
-- Supply chain (A03) is a build-time concern. Run `mvn org.owasp:dependency-check-maven:check`
-  and `npm audit` in CI.
+- Supply chain (A03): the published jars and the npm package contain no third-party code, and CI
+  checks that on every push (see [Continuous integration](#continuous-integration)). Your own
+  application's dependencies are yours to check: run [OSV-Scanner](https://google.github.io/osv-scanner/),
+  `mvn org.owasp:dependency-check-maven:check` or `npm audit` in your CI.
+- The Spring Boot starter brings no Spring of its own: your application's Spring Boot is used.
+  Spring Boot **3.5.16**, the last 3.5 release on Maven Central, has known advisories in its
+  Tomcat, Spring MVC and Jackson versions, fixed only in Spring Boot 4. The starter supports both,
+  so prefer Spring Boot 4.x (4.2.0 had no known advisories when this was written).

@@ -168,6 +168,55 @@ jobs:
       - name: Fail on HIGH findings
         run: node js/bin/secure.js scan . --fail-on high
 
+  dependencies:
+    name: Supply chain (shipped code has no third-party dependencies or known vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: java/**/pom.xml
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # Two SBOMs: what the published jars bring to users (compile and runtime scope), and everything
+      # the build uses (adds provided and test scope: JUnit, and Spring Boot for the starter's tests).
+      - name: SBOMs (CycloneDX)
+        working-directory: java
+        run: |
+          mvn -B -ntp -q install -DskipTests
+          mvn -B -ntp -q org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom -DoutputFormat=json \
+            -DincludeTestScope=false -DincludeProvidedScope=false -DincludeSystemScope=false -DoutputName=shipped.cdx
+          mvn -B -ntp -q org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeAggregateBom -DoutputFormat=json \
+            -DincludeTestScope=true -DoutputName=all.cdx
+
+      # OSV-Scanner, pinned; the Go module checksum database verifies the download.
+      - name: Scan with OSV-Scanner
+        working-directory: java/target
+        run: |
+          OSV=github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.1
+          go run "$OSV" scan source --format json --output-file osv-shipped.json -L shipped.cdx.json || [ $? -eq 1 ]
+          go run "$OSV" scan source --format json --output-file osv-all.json -L all.cdx.json || [ $? -eq 1 ]
+
+      - name: Gate on shipped code, report build and test dependencies
+        run: node .github/scripts/check-dependencies.mjs java/target/shipped.cdx.json java/target/osv-shipped.json java/target/osv-all.json
+
+      - name: Upload SBOMs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: |
+            java/target/*.cdx.json
+            java/target/osv-*.json
+          if-no-files-found: ignore
+
   rules-in-sync:
     name: Java and JavaScript agree
     runs-on: ubuntu-latest

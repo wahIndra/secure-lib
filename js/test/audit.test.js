@@ -263,3 +263,52 @@ test('auditFields(req) fills in the user and request details for application eve
   assert.equal(r.remoteAddress, '10.0.0.5');
   assert.equal(auditFields({ method: 'GET', url: '/' }).principalId, undefined);
 });
+
+function openssl(args) {
+  try {
+    execFileSync('openssl', args, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('syslog over TLS verifies the server certificate (test certificate made with openssl)', async (t) => {
+  const dir = tmp();
+  const key = path.join(dir, 'key.pem');
+  const cert = path.join(dir, 'cert.pem');
+  const conf = path.join(dir, 'req.cnf');
+  fs.writeFileSync(conf, '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=localhost\n[ext]\nsubjectAltName=IP:127.0.0.1,DNS:localhost\n');
+  if (!openssl(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '2', '-config', conf])) {
+    t.skip('openssl is not installed');
+    return;
+  }
+  const tls = await import('node:tls');
+  const received = [];
+  const server = tls.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (s) => {
+    s.on('data', (d) => received.push(d.toString('utf8')));
+    s.on('error', () => {});
+  });
+  server.on('tlsClientError', () => {});
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+
+  const untrusting = new SyslogAuditSink({ host: '127.0.0.1', port, protocol: 'tls' });
+  await assert.rejects(untrusting.write(auditRecord('must-not-arrive')));
+  untrusting.close();
+
+  // Asking to skip verification is ignored: certificates are always checked.
+  // secure-scan:ignore TLS_VALIDATION_DISABLED -- the test proves this option has no effect
+  const insisting = new SyslogAuditSink({ host: '127.0.0.1', port, protocol: 'tls', tlsOptions: { rejectUnauthorized: false } });
+  await assert.rejects(insisting.write(auditRecord('must-not-arrive-either')));
+  insisting.close();
+
+  const trusting = new SyslogAuditSink({ host: '127.0.0.1', port, protocol: 'tls', format: 'json', tlsOptions: { ca: fs.readFileSync(cert) } });
+  await trusting.write(auditRecord('over-tls'));
+  await new Promise((r) => setTimeout(r, 100));
+  trusting.close();
+  server.close();
+  const all = received.join('');
+  assert.match(all, /"event":"over-tls"/);
+  assert.doesNotMatch(all, /must-not-arrive/);
+});
