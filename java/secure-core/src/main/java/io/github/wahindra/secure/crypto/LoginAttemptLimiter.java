@@ -70,6 +70,7 @@ public final class LoginAttemptLimiter {
     private long lastMaintenance = Long.MIN_VALUE / 2;
     private long evictions;
     private volatile SecurityEventListener lockoutListener;
+    private volatile SecurityEventListener attemptListener;
 
     public LoginAttemptLimiter() {
         this(5, Duration.ofMinutes(15), Duration.ofMinutes(15), 100_000, Clock.systemUTC());
@@ -111,8 +112,35 @@ public final class LoginAttemptLimiter {
         return this;
     }
 
+    /**
+     * Reports every attempt: {@code LOGIN_FAILED} from {@link #recordFailure} and {@code
+     * LOGIN_SUCCEEDED} from {@link #recordSuccess}, for an audit trail. The key is reported as the
+     * principal. Runs outside the limiter's lock.
+     */
+    public LoginAttemptLimiter onAttempt(SecurityEventListener listener) {
+        this.attemptListener = listener;
+        return this;
+    }
+
+    private void emitAttempt(SecurityEvent.Type type, String key) {
+        SecurityEventListener l = attemptListener;
+        if (l != null) {
+            try {
+                SecurityEvent.Builder b = SecurityEvent.builder(type, SafeErrors.newIncidentId()).principalId(key);
+                if (type == SecurityEvent.Type.LOGIN_FAILED) {
+                    b.category(OwaspCategory.AUTHENTICATION_FAILURES);
+                }
+                l.onEvent(b.build());
+            } catch (RuntimeException ignored) {
+                // A broken listener must never affect authentication.
+            }
+        }
+    }
+
     public void recordFailure(String key) {
-        if (recordFailureLocked(key)) {
+        boolean locked = recordFailureLocked(key);
+        emitAttempt(SecurityEvent.Type.LOGIN_FAILED, key);
+        if (locked) {
             SecurityEventListener l = lockoutListener;
             if (l != null) {
                 try {
@@ -154,11 +182,14 @@ public final class LoginAttemptLimiter {
         return locked;
     }
 
-    public synchronized void recordSuccess(String key) {
-        Entry e = entries.remove(key);
-        if (e != null) {
-            levels[e.level].remove(key);
+    public void recordSuccess(String key) {
+        synchronized (this) {
+            Entry e = entries.remove(key);
+            if (e != null) {
+                levels[e.level].remove(key);
+            }
         }
+        emitAttempt(SecurityEvent.Type.LOGIN_SUCCEEDED, key);
     }
 
     /** Number of keys currently tracked (for monitoring). */

@@ -1,0 +1,160 @@
+# Generated from the Java implementation by AuditVectors.main; both test suites check it.
+# chained / chainedHmac: the json line in a hash chain over the cases in this order
+# (HMAC key: audit-vector-hmac-key-0123456789).
+
+case	blocked SQL injection, every security field
+kind	security
+event	REQUEST_BLOCKED
+timestamp	2026-11-25T01:02:03.456789Z
+incidentId	3f2a9c1e-0000-4000-8000-000000000001
+method	POST
+path	/api/search
+remoteAddress	203.0.113.9
+principalId	alice
+category	INJECTION
+ruleIds	SQLI_UNION,SQLI_QUOTE_COMMENT
+detail	param:q=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]
+json	{"timestamp":"2026-11-25T01:02:03.456Z","kind":"security","event":"REQUEST_BLOCKED","outcome":"blocked","severity":7,"incidentId":"3f2a9c1e-0000-4000-8000-000000000001","principalId":"alice","remoteAddress":"203.0.113.9","method":"POST","path":"/api/search","owasp":"A05:2025","category":"Injection","ruleIds":["SQLI_UNION","SQLI_QUOTE_COMMENT"],"detail":"param:q=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]"}
+ecs	{"@timestamp":"2026-11-25T01:02:03.456Z","ecs":{"version":"8.11.0"},"event":{"kind":"alert","category":["intrusion_detection","web"],"type":["denied"],"action":"REQUEST_BLOCKED","outcome":"failure","severity":7,"id":"3f2a9c1e-0000-4000-8000-000000000001"},"user":{"id":"alice"},"source":{"ip":"203.0.113.9"},"http":{"request":{"method":"POST"}},"url":{"path":"/api/search"},"rule":{"id":["SQLI_UNION","SQLI_QUOTE_COMMENT"]},"labels":{"audit_kind":"security","audit_outcome":"blocked","owasp":"A05:2025","owasp_category":"Injection"},"message":"param:q=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]"}
+cef	CEF:0|wahindra|secure|1|REQUEST_BLOCKED|Malicious request blocked|7|rt=1795568523456 outcome=blocked externalId=3f2a9c1e-0000-4000-8000-000000000001 suser=alice src=203.0.113.9 requestMethod=POST request=/api/search cs1Label=owasp cs1=A05:2025 cs2Label=rules cs2=SQLI_UNION,SQLI_QUOTE_COMMENT cs4Label=kind cs4=security msg=param:q\=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]
+chained	{"timestamp":"2026-11-25T01:02:03.456Z","kind":"security","event":"REQUEST_BLOCKED","outcome":"blocked","severity":7,"incidentId":"3f2a9c1e-0000-4000-8000-000000000001","principalId":"alice","remoteAddress":"203.0.113.9","method":"POST","path":"/api/search","owasp":"A05:2025","category":"Injection","ruleIds":["SQLI_UNION","SQLI_QUOTE_COMMENT"],"detail":"param:q=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]","prev":"0000000000000000000000000000000000000000000000000000000000000000","hash":"a0de4ed7c0e9bf1ede34a94df59203ca6ce755b4b71a8bfc8adcbca8ab6cf88e"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:03.456Z","kind":"security","event":"REQUEST_BLOCKED","outcome":"blocked","severity":7,"incidentId":"3f2a9c1e-0000-4000-8000-000000000001","principalId":"alice","remoteAddress":"203.0.113.9","method":"POST","path":"/api/search","owasp":"A05:2025","category":"Injection","ruleIds":["SQLI_UNION","SQLI_QUOTE_COMMENT"],"detail":"param:q=[SQLI_UNION[HIGH], SQLI_QUOTE_COMMENT[MEDIUM]]","prev":"0000000000000000000000000000000000000000000000000000000000000000","hash":"07448e14a520e9ad4f68f9f65d998baa8bc86a6861d56c54c9eb8dc93f3a9ab0"}
+
+case	flagged request, IPv6 client
+kind	security
+event	REQUEST_FLAGGED
+timestamp	2026-11-25T01:02:04Z
+incidentId	inc-2
+method	GET
+path	/search
+remoteAddress	2001:db8::7
+category	INJECTION
+ruleIds	XSS_SCRIPT_TAG
+json	{"timestamp":"2026-11-25T01:02:04.000Z","kind":"security","event":"REQUEST_FLAGGED","outcome":"flagged","severity":5,"incidentId":"inc-2","remoteAddress":"2001:db8::7","method":"GET","path":"/search","owasp":"A05:2025","category":"Injection","ruleIds":["XSS_SCRIPT_TAG"]}
+ecs	{"@timestamp":"2026-11-25T01:02:04.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"alert","category":["intrusion_detection","web"],"type":["info"],"action":"REQUEST_FLAGGED","outcome":"unknown","severity":5,"id":"inc-2"},"source":{"ip":"2001:db8::7"},"http":{"request":{"method":"GET"}},"url":{"path":"/search"},"rule":{"id":["XSS_SCRIPT_TAG"]},"labels":{"audit_kind":"security","audit_outcome":"flagged","owasp":"A05:2025","owasp_category":"Injection"}}
+cef	CEF:0|wahindra|secure|1|REQUEST_FLAGGED|Suspicious request flagged|5|rt=1795568524000 outcome=flagged externalId=inc-2 src=2001:db8::7 requestMethod=GET request=/search cs1Label=owasp cs1=A05:2025 cs2Label=rules cs2=XSS_SCRIPT_TAG cs4Label=kind cs4=security
+chained	{"timestamp":"2026-11-25T01:02:04.000Z","kind":"security","event":"REQUEST_FLAGGED","outcome":"flagged","severity":5,"incidentId":"inc-2","remoteAddress":"2001:db8::7","method":"GET","path":"/search","owasp":"A05:2025","category":"Injection","ruleIds":["XSS_SCRIPT_TAG"],"prev":"a0de4ed7c0e9bf1ede34a94df59203ca6ce755b4b71a8bfc8adcbca8ab6cf88e","hash":"38a49737c95b68a0ff97b846dfc70849fdb6096c671dbba97c3d11ec02c7ac9e"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:04.000Z","kind":"security","event":"REQUEST_FLAGGED","outcome":"flagged","severity":5,"incidentId":"inc-2","remoteAddress":"2001:db8::7","method":"GET","path":"/search","owasp":"A05:2025","category":"Injection","ruleIds":["XSS_SCRIPT_TAG"],"prev":"07448e14a520e9ad4f68f9f65d998baa8bc86a6861d56c54c9eb8dc93f3a9ab0","hash":"3ea0701a36ad5d4038de81baafb81464ec2cc585028f9ff54433118ed2b3230c"}
+
+case	rate limited, host name instead of an IP
+kind	security
+event	RATE_LIMITED
+timestamp	2026-11-25T01:02:05.1Z
+incidentId	inc-3
+method	GET
+path	/api/orders
+remoteAddress	proxy.internal
+json	{"timestamp":"2026-11-25T01:02:05.100Z","kind":"security","event":"RATE_LIMITED","outcome":"denied","severity":4,"incidentId":"inc-3","remoteAddress":"proxy.internal","method":"GET","path":"/api/orders"}
+ecs	{"@timestamp":"2026-11-25T01:02:05.100Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","category":["web"],"type":["denied"],"action":"RATE_LIMITED","outcome":"failure","severity":4,"id":"inc-3"},"source":{"address":"proxy.internal"},"http":{"request":{"method":"GET"}},"url":{"path":"/api/orders"},"labels":{"audit_kind":"security","audit_outcome":"denied"}}
+cef	CEF:0|wahindra|secure|1|RATE_LIMITED|Rate limit exceeded|4|rt=1795568525100 outcome=denied externalId=inc-3 shost=proxy.internal requestMethod=GET request=/api/orders cs4Label=kind cs4=security
+chained	{"timestamp":"2026-11-25T01:02:05.100Z","kind":"security","event":"RATE_LIMITED","outcome":"denied","severity":4,"incidentId":"inc-3","remoteAddress":"proxy.internal","method":"GET","path":"/api/orders","prev":"38a49737c95b68a0ff97b846dfc70849fdb6096c671dbba97c3d11ec02c7ac9e","hash":"be33cb1cb7d3ba54c551d26d322fecf76367adc917218aca69601f582c5aca3d"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:05.100Z","kind":"security","event":"RATE_LIMITED","outcome":"denied","severity":4,"incidentId":"inc-3","remoteAddress":"proxy.internal","method":"GET","path":"/api/orders","prev":"3ea0701a36ad5d4038de81baafb81464ec2cc585028f9ff54433118ed2b3230c","hash":"c46eecf97c40e4062bf045fb311957773fb0e0dd019703a5169cc99de1b0369c"}
+
+case	login failed
+kind	security
+event	LOGIN_FAILED
+timestamp	2026-11-25T01:02:06Z
+incidentId	inc-4
+principalId	bob@example.com
+category	AUTHENTICATION_FAILURES
+json	{"timestamp":"2026-11-25T01:02:06.000Z","kind":"security","event":"LOGIN_FAILED","outcome":"failure","severity":3,"incidentId":"inc-4","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures"}
+ecs	{"@timestamp":"2026-11-25T01:02:06.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","category":["authentication"],"type":["info"],"action":"LOGIN_FAILED","outcome":"failure","severity":3,"id":"inc-4"},"user":{"id":"bob@example.com"},"labels":{"audit_kind":"security","audit_outcome":"failure","owasp":"A07:2025","owasp_category":"Authentication Failures"}}
+cef	CEF:0|wahindra|secure|1|LOGIN_FAILED|Login failed|3|rt=1795568526000 outcome=failure externalId=inc-4 suser=bob@example.com cs1Label=owasp cs1=A07:2025 cs4Label=kind cs4=security
+chained	{"timestamp":"2026-11-25T01:02:06.000Z","kind":"security","event":"LOGIN_FAILED","outcome":"failure","severity":3,"incidentId":"inc-4","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures","prev":"be33cb1cb7d3ba54c551d26d322fecf76367adc917218aca69601f582c5aca3d","hash":"dccef1c235310ac27f1de6493b6aa84a257238abdaa90ca9ccf6e19cc7923b3a"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:06.000Z","kind":"security","event":"LOGIN_FAILED","outcome":"failure","severity":3,"incidentId":"inc-4","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures","prev":"c46eecf97c40e4062bf045fb311957773fb0e0dd019703a5169cc99de1b0369c","hash":"cb04ffab2fc3c6cddc834f319c3da3ceb95b90acceda0216b825e19a46c6264c"}
+
+case	login succeeded
+kind	security
+event	LOGIN_SUCCEEDED
+timestamp	2026-11-25T01:02:07Z
+incidentId	inc-5
+principalId	bob@example.com
+json	{"timestamp":"2026-11-25T01:02:07.000Z","kind":"security","event":"LOGIN_SUCCEEDED","outcome":"success","severity":1,"incidentId":"inc-5","principalId":"bob@example.com"}
+ecs	{"@timestamp":"2026-11-25T01:02:07.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","category":["authentication"],"type":["allowed"],"action":"LOGIN_SUCCEEDED","outcome":"success","severity":1,"id":"inc-5"},"user":{"id":"bob@example.com"},"labels":{"audit_kind":"security","audit_outcome":"success"}}
+cef	CEF:0|wahindra|secure|1|LOGIN_SUCCEEDED|Login succeeded|1|rt=1795568527000 outcome=success externalId=inc-5 suser=bob@example.com cs4Label=kind cs4=security
+chained	{"timestamp":"2026-11-25T01:02:07.000Z","kind":"security","event":"LOGIN_SUCCEEDED","outcome":"success","severity":1,"incidentId":"inc-5","principalId":"bob@example.com","prev":"dccef1c235310ac27f1de6493b6aa84a257238abdaa90ca9ccf6e19cc7923b3a","hash":"56091f7db38740dfbb7d80b7d528b5025607a9730758b4e7fbe8a40b26ca03e2"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:07.000Z","kind":"security","event":"LOGIN_SUCCEEDED","outcome":"success","severity":1,"incidentId":"inc-5","principalId":"bob@example.com","prev":"cb04ffab2fc3c6cddc834f319c3da3ceb95b90acceda0216b825e19a46c6264c","hash":"98e8d2fc77cb6b27c8f8598b25cf71b8a854977f3011e123eeeafd1f644bd6c3"}
+
+case	account locked out
+kind	security
+event	LOGIN_LOCKED
+timestamp	2026-11-25T01:02:08Z
+incidentId	inc-6
+principalId	bob@example.com
+category	AUTHENTICATION_FAILURES
+detail	5 failures; locked for 900 s
+json	{"timestamp":"2026-11-25T01:02:08.000Z","kind":"security","event":"LOGIN_LOCKED","outcome":"denied","severity":7,"incidentId":"inc-6","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures","detail":"5 failures; locked for 900 s"}
+ecs	{"@timestamp":"2026-11-25T01:02:08.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","category":["authentication"],"type":["denied"],"action":"LOGIN_LOCKED","outcome":"failure","severity":7,"id":"inc-6"},"user":{"id":"bob@example.com"},"labels":{"audit_kind":"security","audit_outcome":"denied","owasp":"A07:2025","owasp_category":"Authentication Failures"},"message":"5 failures; locked for 900 s"}
+cef	CEF:0|wahindra|secure|1|LOGIN_LOCKED|Account locked out|7|rt=1795568528000 outcome=denied externalId=inc-6 suser=bob@example.com cs1Label=owasp cs1=A07:2025 cs4Label=kind cs4=security msg=5 failures; locked for 900 s
+chained	{"timestamp":"2026-11-25T01:02:08.000Z","kind":"security","event":"LOGIN_LOCKED","outcome":"denied","severity":7,"incidentId":"inc-6","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures","detail":"5 failures; locked for 900 s","prev":"56091f7db38740dfbb7d80b7d528b5025607a9730758b4e7fbe8a40b26ca03e2","hash":"d04f2c49961a95d399ea25599cf638073b8a7a9b9759ec54cb075b34507a2c8d"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:08.000Z","kind":"security","event":"LOGIN_LOCKED","outcome":"denied","severity":7,"incidentId":"inc-6","principalId":"bob@example.com","owasp":"A07:2025","category":"Authentication Failures","detail":"5 failures; locked for 900 s","prev":"98e8d2fc77cb6b27c8f8598b25cf71b8a854977f3011e123eeeafd1f644bd6c3","hash":"8a0c40edd681d95636a66e31c15dcd20a06692acd1092f2acc4e84bd7c5c7c7c"}
+
+case	access denied with user and path
+kind	security
+event	ACCESS_DENIED
+timestamp	2026-11-25T01:02:09Z
+incidentId	inc-7
+method	GET
+path	/api/orders/42
+principalId	mallory
+category	BROKEN_ACCESS_CONTROL
+json	{"timestamp":"2026-11-25T01:02:09.000Z","kind":"security","event":"ACCESS_DENIED","outcome":"denied","severity":5,"incidentId":"inc-7","principalId":"mallory","method":"GET","path":"/api/orders/42","owasp":"A01:2025","category":"Broken Access Control"}
+ecs	{"@timestamp":"2026-11-25T01:02:09.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","category":["web"],"type":["denied"],"action":"ACCESS_DENIED","outcome":"failure","severity":5,"id":"inc-7"},"user":{"id":"mallory"},"http":{"request":{"method":"GET"}},"url":{"path":"/api/orders/42"},"labels":{"audit_kind":"security","audit_outcome":"denied","owasp":"A01:2025","owasp_category":"Broken Access Control"}}
+cef	CEF:0|wahindra|secure|1|ACCESS_DENIED|Access denied|5|rt=1795568529000 outcome=denied externalId=inc-7 suser=mallory requestMethod=GET request=/api/orders/42 cs1Label=owasp cs1=A01:2025 cs4Label=kind cs4=security
+chained	{"timestamp":"2026-11-25T01:02:09.000Z","kind":"security","event":"ACCESS_DENIED","outcome":"denied","severity":5,"incidentId":"inc-7","principalId":"mallory","method":"GET","path":"/api/orders/42","owasp":"A01:2025","category":"Broken Access Control","prev":"d04f2c49961a95d399ea25599cf638073b8a7a9b9759ec54cb075b34507a2c8d","hash":"4858747e1d2dfab923932f3c776463c2fe69c727f4360d8c92a869c40234fc35"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:09.000Z","kind":"security","event":"ACCESS_DENIED","outcome":"denied","severity":5,"incidentId":"inc-7","principalId":"mallory","method":"GET","path":"/api/orders/42","owasp":"A01:2025","category":"Broken Access Control","prev":"8a0c40edd681d95636a66e31c15dcd20a06692acd1092f2acc4e84bd7c5c7c7c","hash":"579e9277312fc9cfb0ab7fd73fb0db5c8321f3d776f04e0734a7bab7d77f50a0"}
+
+case	application event, defaults
+kind	application
+event	order.refund
+timestamp	2026-11-25T01:02:10Z
+incidentId	inc-8
+principalId	alice
+resource	order/42
+json	{"timestamp":"2026-11-25T01:02:10.000Z","kind":"application","event":"order.refund","outcome":"success","severity":1,"incidentId":"inc-8","principalId":"alice","resource":"order/42"}
+ecs	{"@timestamp":"2026-11-25T01:02:10.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","type":["allowed"],"action":"order.refund","outcome":"success","severity":1,"id":"inc-8"},"user":{"id":"alice"},"labels":{"audit_kind":"application","audit_outcome":"success","resource":"order/42"}}
+cef	CEF:0|wahindra|secure|1|order.refund|order.refund|1|rt=1795568530000 outcome=success externalId=inc-8 suser=alice cs3Label=resource cs3=order/42 cs4Label=kind cs4=application
+chained	{"timestamp":"2026-11-25T01:02:10.000Z","kind":"application","event":"order.refund","outcome":"success","severity":1,"incidentId":"inc-8","principalId":"alice","resource":"order/42","prev":"4858747e1d2dfab923932f3c776463c2fe69c727f4360d8c92a869c40234fc35","hash":"965fd3d842c2a46cc0b42e7d21b901701ab96a7a5b0c59a64e27ddbf81a705d8"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:10.000Z","kind":"application","event":"order.refund","outcome":"success","severity":1,"incidentId":"inc-8","principalId":"alice","resource":"order/42","prev":"579e9277312fc9cfb0ab7fd73fb0db5c8321f3d776f04e0734a7bab7d77f50a0","hash":"ee09d825b7342b319ba5f14a87ce1a73907b079b33c9d391a446e42dea03a1dc"}
+
+case	application event, characters every format must escape
+kind	application
+event	user.role|change
+outcome	denied
+timestamp	2026-11-25T01:02:11Z
+incidentId	inc-9
+principalId	admin "root"
+remoteAddress	198.51.100.4
+resource	user/17=admin\\x
+detail	from=user to=admin\nnext line\tTAB "quoted" back\\slash pipe| password=hunter2 Bearer abc.def ünïcödé 日本 😀 \u0007bell
+json	{"timestamp":"2026-11-25T01:02:11.000Z","kind":"application","event":"user.role|change","outcome":"denied","severity":5,"incidentId":"inc-9","principalId":"admin \"root\"","remoteAddress":"198.51.100.4","resource":"user/17=admin\\x","detail":"from=user to=admin\\nnext line\\tTAB \"quoted\" back\\slash pipe| password=**** Bearer abc.def ünïcödé 日本 😀 \\u0007bell"}
+ecs	{"@timestamp":"2026-11-25T01:02:11.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","type":["denied"],"action":"user.role|change","outcome":"failure","severity":5,"id":"inc-9"},"user":{"id":"admin \"root\""},"source":{"ip":"198.51.100.4"},"labels":{"audit_kind":"application","audit_outcome":"denied","resource":"user/17=admin\\x"},"message":"from=user to=admin\\nnext line\\tTAB \"quoted\" back\\slash pipe| password=**** Bearer abc.def ünïcödé 日本 😀 \\u0007bell"}
+cef	CEF:0|wahindra|secure|1|user.role\|change|user.role\|change|5|rt=1795568531000 outcome=denied externalId=inc-9 suser=admin "root" src=198.51.100.4 cs3Label=resource cs3=user/17\=admin\\x cs4Label=kind cs4=application msg=from\=user to\=admin\\nnext line\\tTAB "quoted" back\\slash pipe| password\=**** Bearer abc.def ünïcödé 日本 😀 \\u0007bell
+chained	{"timestamp":"2026-11-25T01:02:11.000Z","kind":"application","event":"user.role|change","outcome":"denied","severity":5,"incidentId":"inc-9","principalId":"admin \"root\"","remoteAddress":"198.51.100.4","resource":"user/17=admin\\x","detail":"from=user to=admin\\nnext line\\tTAB \"quoted\" back\\slash pipe| password=**** Bearer abc.def ünïcödé 日本 😀 \\u0007bell","prev":"965fd3d842c2a46cc0b42e7d21b901701ab96a7a5b0c59a64e27ddbf81a705d8","hash":"22d847204f1c11801de7c682e105c7e3ff3636b1f62a53db6c113360518a0e83"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:11.000Z","kind":"application","event":"user.role|change","outcome":"denied","severity":5,"incidentId":"inc-9","principalId":"admin \"root\"","remoteAddress":"198.51.100.4","resource":"user/17=admin\\x","detail":"from=user to=admin\\nnext line\\tTAB \"quoted\" back\\slash pipe| password=**** Bearer abc.def ünïcödé 日本 😀 \\u0007bell","prev":"ee09d825b7342b319ba5f14a87ce1a73907b079b33c9d391a446e42dea03a1dc","hash":"ced54b38c25844d5338f54ac3e07adbe5e39e1baeb7ceb88477e71ea5dd54af6"}
+
+case	application event, explicit severity and failure outcome
+kind	application
+event	payment.capture
+outcome	failure
+severity	9
+timestamp	2026-11-25T01:02:12Z
+incidentId	inc-10
+resource	payment/pi_123
+detail	gateway timeout
+json	{"timestamp":"2026-11-25T01:02:12.000Z","kind":"application","event":"payment.capture","outcome":"failure","severity":9,"incidentId":"inc-10","resource":"payment/pi_123","detail":"gateway timeout"}
+ecs	{"@timestamp":"2026-11-25T01:02:12.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","type":["info"],"action":"payment.capture","outcome":"failure","severity":9,"id":"inc-10"},"labels":{"audit_kind":"application","audit_outcome":"failure","resource":"payment/pi_123"},"message":"gateway timeout"}
+cef	CEF:0|wahindra|secure|1|payment.capture|payment.capture|9|rt=1795568532000 outcome=failure externalId=inc-10 cs3Label=resource cs3=payment/pi_123 cs4Label=kind cs4=application msg=gateway timeout
+chained	{"timestamp":"2026-11-25T01:02:12.000Z","kind":"application","event":"payment.capture","outcome":"failure","severity":9,"incidentId":"inc-10","resource":"payment/pi_123","detail":"gateway timeout","prev":"22d847204f1c11801de7c682e105c7e3ff3636b1f62a53db6c113360518a0e83","hash":"c577b69d40debf071a6a2c6d1c94475635a1637232c52c280eed650f19709013"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:12.000Z","kind":"application","event":"payment.capture","outcome":"failure","severity":9,"incidentId":"inc-10","resource":"payment/pi_123","detail":"gateway timeout","prev":"ced54b38c25844d5338f54ac3e07adbe5e39e1baeb7ceb88477e71ea5dd54af6","hash":"74bc4a5a07f875cabd853097ff3a75cf0372abee9fe72d1070be173837128a94"}
+
+case	application event, minimal
+kind	application
+event	config.reload
+timestamp	2026-11-25T01:02:13Z
+incidentId	inc-11
+json	{"timestamp":"2026-11-25T01:02:13.000Z","kind":"application","event":"config.reload","outcome":"success","severity":1,"incidentId":"inc-11"}
+ecs	{"@timestamp":"2026-11-25T01:02:13.000Z","ecs":{"version":"8.11.0"},"event":{"kind":"event","type":["allowed"],"action":"config.reload","outcome":"success","severity":1,"id":"inc-11"},"labels":{"audit_kind":"application","audit_outcome":"success"}}
+cef	CEF:0|wahindra|secure|1|config.reload|config.reload|1|rt=1795568533000 outcome=success externalId=inc-11 cs4Label=kind cs4=application
+chained	{"timestamp":"2026-11-25T01:02:13.000Z","kind":"application","event":"config.reload","outcome":"success","severity":1,"incidentId":"inc-11","prev":"c577b69d40debf071a6a2c6d1c94475635a1637232c52c280eed650f19709013","hash":"e5063118f05062f3dfda0371ec450cc472cf5fa939c4d46f147ea4a281269c72"}
+chainedHmac	{"timestamp":"2026-11-25T01:02:13.000Z","kind":"application","event":"config.reload","outcome":"success","severity":1,"incidentId":"inc-11","prev":"74bc4a5a07f875cabd853097ff3a75cf0372abee9fe72d1070be173837128a94","hash":"ea417e3ccd12bce8bd94cd4bbc832a75f49b99da1845ef44226e63443cfb41db"}

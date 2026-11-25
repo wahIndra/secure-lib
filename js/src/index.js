@@ -56,3 +56,15 @@ export {
   emitSecurityEvent,
   SecurityEventType,
 } from './api.js';
+export {
+  AuditLog,
+  FileAuditSink,
+  SyslogAuditSink,
+  AuditChain,
+  AuditFormat,
+  AuditOutcome,
+  AUDIT_GENESIS,
+  auditRecord,
+  auditRecordOf,
+  formatAuditRecord,
+} from './audit.js';

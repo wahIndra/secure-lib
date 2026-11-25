@@ -242,6 +242,8 @@ export declare class LoginAttemptLimiter {
   readonly evictionCount: number;
   /** Reports a LOGIN_LOCKED event whenever a key becomes locked. */
   onLockout(listener: (event: SecurityEvent) => void): this;
+  /** Reports LOGIN_FAILED / LOGIN_SUCCEEDED for every attempt, for an audit trail. */
+  onAttempt(listener: (event: SecurityEvent) => void): this;
 }
 
 export declare function randomToken(bytes?: number): string;
@@ -360,7 +362,8 @@ export declare class CorsPolicy {
 }
 
 export type SecurityEventTypeName =
-  | 'REQUEST_BLOCKED' | 'REQUEST_FLAGGED' | 'RATE_LIMITED' | 'CORS_REJECTED' | 'ACCESS_DENIED' | 'LOGIN_LOCKED' | 'INSPECTION_ERROR';
+  | 'REQUEST_BLOCKED' | 'REQUEST_FLAGGED' | 'RATE_LIMITED' | 'CORS_REJECTED' | 'ACCESS_DENIED' | 'LOGIN_LOCKED'
+  | 'LOGIN_FAILED' | 'LOGIN_SUCCEEDED' | 'INSPECTION_ERROR';
 
 export declare const SecurityEventType: Readonly<Record<SecurityEventTypeName, SecurityEventTypeName>>;
 
@@ -389,3 +392,136 @@ export declare function emitSecurityEvent(
   listeners?: Array<(event: SecurityEvent) => void>,
   logger?: { log?: (m: string) => void; info?: (m: string) => void; warn?: (m: string) => void },
 ): void;
+
+// ---------------------------------------------------------------- audit log
+
+export type AuditOutcomeName = 'success' | 'failure' | 'denied' | 'blocked' | 'flagged' | 'error';
+export declare const AuditOutcome: Readonly<{
+  SUCCESS: 'success'; FAILURE: 'failure'; DENIED: 'denied'; BLOCKED: 'blocked'; FLAGGED: 'flagged'; ERROR: 'error';
+}>;
+export type AuditFormatName = 'json' | 'ecs' | 'cef';
+export declare const AuditFormat: Readonly<{ JSON: 'json'; ECS: 'ecs'; CEF: 'cef' }>;
+export declare const AUDIT_GENESIS: string;
+
+export interface AuditRecord {
+  readonly timestamp: string;
+  readonly kind: 'security' | 'application';
+  readonly event: string;
+  readonly outcome: AuditOutcomeName;
+  /** 0 (informational) to 10 (critical), as in CEF. */
+  readonly severity: number;
+  readonly incidentId: string;
+  readonly principalId?: string;
+  readonly remoteAddress?: string;
+  readonly method?: string;
+  readonly path?: string;
+  readonly resource?: string;
+  readonly owasp?: string;
+  readonly category?: string;
+  readonly ruleIds: readonly string[];
+  readonly detail?: string;
+}
+
+export interface AuditFields {
+  outcome?: AuditOutcomeName;
+  severity?: number;
+  timestamp?: string | number | Date;
+  incidentId?: string;
+  principalId?: string;
+  remoteAddress?: string;
+  method?: string;
+  path?: string;
+  resource?: string;
+  owasp?: string;
+  category?: string;
+  ruleIds?: string[];
+  /** Free text. Never put passwords, tokens or request bodies here (secrets are masked anyway). */
+  detail?: string;
+}
+
+/** An application action, e.g. auditRecord('order.refund', { principalId, resource: 'order/42' }). */
+export declare function auditRecord(event: string, fields?: AuditFields): AuditRecord;
+export declare function auditRecordOf(event: SecurityEvent): AuditRecord;
+/** One line, identical to the Java library's output for the same record. */
+export declare function formatAuditRecord(record: AuditRecord, format?: AuditFormatName): string;
+
+export interface AuditSink {
+  write(record: AuditRecord): void | Promise<void>;
+  close?(): void | Promise<void>;
+}
+
+export declare class FileAuditSink implements AuditSink {
+  constructor(file: string, options?: {
+    format?: AuditFormatName;
+    /** Rotate when the file would grow past this size; 0 never rotates. Default 10 MB. */
+    maxBytes?: number;
+    /** Rotated files to keep (name.1 ... name.N). Default 10. */
+    maxFiles?: number;
+    /** Add prev/hash to every line; check with `secure audit verify`. */
+    hashChain?: boolean;
+    /** HMAC-SHA256 key (at least 16 bytes); implies hashChain. */
+    hmacKey?: string | Uint8Array | null;
+  });
+  readonly path: string;
+  /** Asynchronous (never stalls the event loop); writes happen in call order. */
+  write(record: AuditRecord): Promise<void>;
+  /** Waits for pending writes, then closes the file. */
+  close(): Promise<void>;
+}
+
+export declare class SyslogAuditSink implements AuditSink {
+  constructor(options: {
+    host: string;
+    port: number;
+    protocol?: 'udp' | 'tcp' | 'tls';
+    format?: AuditFormatName;
+    appName?: string;
+    hostname?: string;
+    /** 0..23, default 13 (log audit). */
+    facility?: number;
+    connectTimeoutMs?: number;
+    /** e.g. { ca } for a private CA, or { cert, key } for mutual TLS. Certificates and host names are always verified. */
+    tlsOptions?: Record<string, unknown>;
+  });
+  /** The RFC 5424 message for a record, without TCP framing. */
+  message(record: AuditRecord): string;
+  write(record: AuditRecord): Promise<void>;
+  close(): void;
+}
+
+export interface AuditChainResult {
+  intact: boolean;
+  records: number;
+  /** "file:line: what is wrong" */
+  problems: string[];
+  notes: string[];
+  /** Hash of the newest record. Compare with your SIEM's copy to detect a cut-off tail. */
+  lastHash: string | null;
+}
+
+export declare class AuditChain {
+  constructor(key?: string | Uint8Array | null);
+  hash(prev: string, line: string): string;
+  link(prev: string, line: string): string;
+  /** Files oldest first, e.g. ['audit.jsonl.2', 'audit.jsonl.1', 'audit.jsonl']. */
+  verify(files: string[]): AuditChainResult;
+}
+
+export declare class AuditLog {
+  constructor(options: {
+    sinks: AuditSink[];
+    /** Records held while sinks catch up; beyond this they are dropped and counted. Default 10,000. */
+    queueCapacity?: number;
+    logger?: { log?: (m: string) => void; info?: (m: string) => void; warn?: (m: string) => void };
+  });
+  /** A security event listener: pass it as onEvent / onLockout / onAttempt. */
+  readonly onEvent: (event: SecurityEvent) => void;
+  /** Queues a record; never throws. Returns false if it was dropped. */
+  record(record: AuditRecord): boolean;
+  record(event: string, fields?: AuditFields): boolean;
+  flush(): Promise<void>;
+  close(): Promise<void>;
+  readonly droppedCount: number;
+  readonly failedWriteCount: number;
+  readonly queued: number;
+}

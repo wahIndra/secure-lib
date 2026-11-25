@@ -6,9 +6,9 @@
 
 OWASP Top 10 protection for Node.js 18+: request inspection middleware for Express (or any
 `(req, res, next)` stack), access-control guards, identity from any OIDC provider, rate
-limiting, strict CORS, SSRF and path-traversal guards, password hashing, and a CLI that finds
-vulnerable code and attacks your local app before you deploy. Zero dependencies, ESM, with
-TypeScript types.
+limiting, strict CORS, an audit log for files and SIEMs, SSRF and path-traversal guards, password
+hashing, and a CLI that finds vulnerable code and attacks your local app before you deploy. Zero
+dependencies, ESM, with TypeScript types.
 
 The same library exists for Java 8+ (Maven Central `io.github.wahindra`), with the same rules
 and test vectors: <https://github.com/wahIndra/secure-lib>.
@@ -82,6 +82,36 @@ app.get('/api/orders/:id', async (req, res) => {
 With `express-oauth2-jwt-bearer`, `currentUser(IDP)` from `@wahindra/secure/express` sets
 `req.user` from `req.auth.payload` for you.
 
+## Audit log: to a file, a SIEM, or both
+
+```js
+import { AuditLog, FileAuditSink, SyslogAuditSink, LoginAttemptLimiter } from '@wahindra/secure';
+import { auditFields } from '@wahindra/secure/express';
+
+const audit = new AuditLog({ sinks: [
+  new FileAuditSink('/var/log/shop/security-audit.jsonl', { hashChain: true, maxBytes: 50e6, maxFiles: 20 }),
+  new SyslogAuditSink({ host: 'siem.example.com', port: 6514, protocol: 'tls', format: 'cef', appName: 'shop' }),
+] });
+
+app.use(securityMiddleware({ onEvent: audit.onEvent }));        // blocked requests, 429s, CORS, denials
+const logins = new LoginAttemptLimiter().onLockout(audit.onEvent).onAttempt(audit.onEvent);
+
+app.post('/api/orders/:id/refund', (req, res) => {
+  // ...
+  audit.record('order.refund', { ...auditFields(req), resource: `order/${req.params.id}` });
+});
+```
+
+- **Destinations:** a file at the path you choose (rotating by size, mode 0600), syslog over UDP,
+  TCP or TLS (RFC 5424 / 5425), or any object with `write(record)`.
+- **Formats:** `json`, `ecs` (Elastic Common Schema) and `cef` (ArcSight, QRadar, Microsoft
+  Sentinel). The lines are identical to the Java library's.
+- **Requests never wait:** records go into a bounded queue. If a destination is down, they are
+  dropped and counted (`audit.droppedCount`, `audit.failedWriteCount`), never thrown.
+- **Safe to keep:** every field is sanitized (no line breaks, secrets and tokens masked).
+- **Tamper evidence:** with `hashChain` (or `hmacKey`), `npx secure audit verify audit.jsonl.1 audit.jsonl`
+  reports any changed, removed or reordered line.
+
 ## Guards
 
 | Need | Use |
@@ -107,6 +137,7 @@ npx secure check "1;SELECT pg_sleep(5)--"  # how the middleware sees a value and
 npx secure probe "http://localhost:3000/search?q=FUZZ"   # attack YOUR local app with 44 payloads
 npx secure idor http://localhost:3000/api/orders/42 \
   --as-owner "Authorization: Bearer $TOKEN_A" --as-other "Authorization: Bearer $TOKEN_B"
+npx secure audit verify security-audit.jsonl.1 security-audit.jsonl   # audit log tamper check
 ```
 
 - **`scan`** has 55 rules: SQL / NoSQL / command injection, XSS sinks, path traversal, SSRF,

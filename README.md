@@ -39,6 +39,7 @@ signatures and CSRF tokens use the same format, so either side can verify what t
 - [How to use: Java](#how-to-use-java)
 - [How to use: JavaScript](#how-to-use-javascript)
 - [API protection: JSON bodies, budgets, rate limits, CORS, redirects, events](#api-protection-json-bodies-budgets-rate-limits-cors-redirects-events)
+- [Audit log: to a file, a SIEM, or both](#audit-log-to-a-file-a-siem-or-both)
 - [Developer tools: catch it while coding](#developer-tools-catch-it-while-coding)
 - [End-to-end check in your own app](#end-to-end-check-in-your-own-app)
 - [Coverage](#coverage)
@@ -64,7 +65,7 @@ devtools/                 shared by both languages
   probe-payloads.txt      payloads for `secure probe`
   hooks/pre-commit        git hook that blocks commits with HIGH findings
   ide/vscode-tasks.json   VS Code tasks with a problem matcher (findings in the Problems panel)
-test-vectors/             shared payloads, crypto fixtures and scanner fixtures (scan/vulnerable, scan/safe)
+test-vectors/             shared payloads, crypto fixtures, audit log vectors and scanner fixtures (scan/vulnerable, scan/safe)
 docs/OWASP-MAPPING.md     what covers each Top 10 category
 .github/
   workflows/ci.yml        build + test matrix, self-scan, Java/JS parity check
@@ -135,8 +136,9 @@ mvn -Prelease -Dgpg.skip verify   # also builds the sources and javadoc jars Mav
 
 One dependency registers everything: the request filter (inspection including JSON bodies,
 security headers, optional CORS and rate limit), `@CurrentUser` injection from the verified
-token, safe 401/403/400 responses for the library's exceptions, and your `SecurityEventListener`
-beans. It runs before Spring Security, so attacks are rejected before authentication work.
+token, safe 401/403/400 responses for the library's exceptions, your `SecurityEventListener`
+beans, and (when configured) the [audit log](#audit-log-to-a-file-a-siem-or-both). It runs before
+Spring Security, so attacks are rejected before authentication work.
 
 ```xml
 <dependency>
@@ -161,6 +163,9 @@ secure:
     requests-per-minute: 300     # per client address
   inspection:
     max-body-bytes: 1048576      # larger JSON bodies are rejected in block mode
+  audit:
+    file:
+      path: /var/log/orders/security-audit.jsonl   # see "Audit log" below
 ```
 
 ```java
@@ -443,7 +448,7 @@ CORS and rate limiting are opt-in), and each one is also available as a standalo
 | **Rate limiting** | `RateLimiter.perMinute(300)`; `secure.rate-limit.*` | `RateLimiter.perMinute(300)`, `rateLimit()` middleware | Scraping, enumeration, brute force on any endpoint. Token bucket per key, 429 with `Retry-After` and `RateLimit-*` headers, bounded memory. |
 | **Strict CORS** | `CorsPolicy.builder().allowOrigins(...)`; `secure.cors.*` | `new CorsPolicy({ allowOrigins })`, `cors()` middleware | Any origin reading your API with the user's cookies. Never reflects `Origin`, never allows `null`, refuses `*` with credentials, answers preflights directly. |
 | **Safe redirects** | `SafeRedirect.target(next, "/", "accounts.example.com")` | `safeRedirect(next, '/', ['accounts.example.com'])` | Open redirects: `//evil`, `/\evil`, `/%2F%2Fevil`, `javascript:`, `https://good@evil`, header injection. |
-| **Security events** | `SecurityEventListener`; `LoginAttemptLimiter.onLockout(...)` | `onEvent` option; `limiter.onLockout(...)` | Attacks nobody notices (A09). `REQUEST_BLOCKED`, `REQUEST_FLAGGED`, `RATE_LIMITED`, `CORS_REJECTED`, `ACCESS_DENIED`, `LOGIN_LOCKED`, `INSPECTION_ERROR` as sanitized events (`toJson()` gives one line for a SIEM). |
+| **Security events** | `SecurityEventListener`; `LoginAttemptLimiter.onLockout(...)` / `.onAttempt(...)` | `onEvent` option; `limiter.onLockout(...)` / `.onAttempt(...)` | Attacks nobody notices (A09). `REQUEST_BLOCKED`, `REQUEST_FLAGGED`, `RATE_LIMITED`, `CORS_REJECTED`, `ACCESS_DENIED`, `LOGIN_FAILED`, `LOGIN_SUCCEEDED`, `LOGIN_LOCKED`, `INSPECTION_ERROR` as sanitized events. To write them to a file or a SIEM, see the [audit log](#audit-log-to-a-file-a-siem-or-both). |
 
 ```java
 // Without Spring Boot: the same engine powers the javax and jakarta filters.
@@ -471,6 +476,115 @@ The rate-limit key is the client address. Behind a reverse proxy, make sure that
 client address, by configuring Express `trust proxy` or the servlet container's
 `RemoteIpValve` / `server.forward-headers-strategy` for your proxy only. Otherwise every client
 can choose its own key with `X-Forwarded-For`.
+
+## Audit log: to a file, a SIEM, or both
+
+Every security event (blocked and flagged requests, rate limits, CORS rejections, access
+denials, failed and successful logins, lockouts, inspection errors) plus your application's own
+actions (`order.refund`, `user.role.change`) can be written to an **audit log**: a file at a path
+you choose, a syslog / SIEM collector, or a sink of your own. Java and JavaScript write
+byte-identical lines (checked by the shared `test-vectors/audit-vectors.txt`).
+
+| | Java (`io.github.wahindra.secure.audit`) | JavaScript |
+|---|---|---|
+| The log | `AuditLog.builder().sink(...).build()` | `new AuditLog({ sinks: [...] })` |
+| File, rotating by size | `FileAuditSink.builder(path).maxBytes(...).maxFiles(...)` | `new FileAuditSink(path, { maxBytes, maxFiles })` |
+| Syslog over UDP, TCP or TLS (RFC 5424 / 5425) | `SyslogAuditSink.builder(host, port).protocol(TLS)` | `new SyslogAuditSink({ host, port, protocol: 'tls' })` |
+| Your own destination (Kafka, a webhook, a database) | implement `AuditSink` | any object with `write(record)` |
+| Formats | `AuditFormat.JSON`, `ECS` (Elastic Common Schema), `CEF` (ArcSight, QRadar, Microsoft Sentinel) | `'json'`, `'ecs'`, `'cef'` |
+| Library events | register the log as a `SecurityEventListener`; `limiter.onLockout(audit).onAttempt(audit)` | `onEvent: audit.onEvent`; `limiter.onLockout(audit.onEvent).onAttempt(audit.onEvent)` |
+| Application events | `audit.record("order.refund", userId, "order/42", SUCCESS)`; Spring: `Auditor` | `audit.record('order.refund', { ...auditFields(req), resource: 'order/42' })` |
+| Tamper evidence | `.hashChain(true)` or `.hmacKey(key)`; `secure audit verify` | `{ hashChain: true }` or `{ hmacKey }`; `npx secure audit verify` |
+
+**Spring Boot:** set a path or a syslog host and the starter does the rest. It records the
+filter's events, failed logins and invalid bearer tokens reported by Spring Security (the token
+itself is never written), and gives you an `Auditor` bean. `Auditor` fills in the user from the
+verified token, the client address, the method and the path.
+
+```yaml
+secure:
+  audit:
+    file:
+      path: /var/log/orders/security-audit.jsonl
+      format: json                 # json | ecs | cef
+      max-bytes: 52428800          # rotate at 50 MB: security-audit.jsonl.1, .2 ...
+      max-files: 20
+      hash-chain: true             # or hmac-key: ${AUDIT_HMAC_KEY} (from a secret store)
+    syslog:
+      host: siem.example.com
+      protocol: tls                # udp | tcp | tls; the port defaults to 514, or 6514 for TLS
+      format: cef                  # what most SIEM collectors parse out of the box
+```
+
+```java
+@PostMapping("/api/orders/{id}/refund")
+Refund refund(@PathVariable long id, @CurrentUser SecurityPrincipal user) {
+    Refund r = refunds.issue(id, user);
+    auditor.record("order.refund", "order/" + id, AuditRecord.Outcome.SUCCESS, "amount=" + r.getAmount());
+    return r;
+}
+```
+
+**Without Spring Boot:**
+
+```java
+AuditLog audit = AuditLog.builder()
+        .sink(FileAuditSink.builder(Paths.get("/var/log/orders/security-audit.jsonl")).hashChain(true).build())
+        .sink(SyslogAuditSink.builder("siem.example.com", 6514).protocol(SyslogAuditSink.Protocol.TLS).appName("orders").build())
+        .build();
+SecurityFilterEngine engine = SecurityFilterEngine.builder().listener(audit).build();
+LoginAttemptLimiter logins = new LoginAttemptLimiter().onLockout(audit).onAttempt(audit);
+```
+
+```js
+import { AuditLog, FileAuditSink, SyslogAuditSink, LoginAttemptLimiter } from '@wahindra/secure';
+import { securityMiddleware, auditFields, errorHandler } from '@wahindra/secure/express';
+
+const audit = new AuditLog({ sinks: [
+  new FileAuditSink('/var/log/orders/security-audit.jsonl', { hashChain: true }),
+  new SyslogAuditSink({ host: 'siem.example.com', port: 6514, protocol: 'tls', appName: 'orders' }),
+] });
+app.use(securityMiddleware({ onEvent: audit.onEvent }));
+app.use(errorHandler({ onEvent: audit.onEvent }));
+const logins = new LoginAttemptLimiter().onLockout(audit.onEvent).onAttempt(audit.onEvent);
+
+app.post('/api/orders/:id/refund', (req, res) => {
+  // ...
+  audit.record('order.refund', { ...auditFields(req), resource: `order/${req.params.id}` });
+});
+```
+
+One JSON line per record (shown wrapped):
+
+```json
+{"timestamp":"2026-11-25T01:02:03.456Z","kind":"security","event":"REQUEST_BLOCKED","outcome":"blocked",
+ "severity":7,"incidentId":"3f2a9c1e-...","principalId":"alice","remoteAddress":"203.0.113.9","method":"POST",
+ "path":"/api/search","owasp":"A05:2025","category":"Injection","ruleIds":["SQLI_UNION"],"detail":"param:q=[...]",
+ "prev":"8c1f...","hash":"e07a..."}
+```
+
+**What you can rely on:**
+
+- **Requests never wait for the log.** Records go into a bounded queue (10,000 by default) and one
+  background writer sends them. If the disk is full or the SIEM is down, records are dropped and
+  counted (`droppedCount()`, `failedWriteCount()`), a warning is logged once, and the request
+  carries on. Alert on those counters.
+- **No secrets and no log forging.** Every field is sanitized: line breaks and control characters
+  are escaped, `password=...`, bearer tokens and JWTs are masked, and lengths are capped. Records
+  never contain request payloads.
+- **Files are private.** New files are created readable and writable by the owner only (mode
+  0600 on Linux and macOS). On Windows they take the directory's permissions, so use a directory
+  only the application can read.
+- **Tamper evidence.** With the hash chain, every line carries the hash of the line before it.
+  `secure audit verify audit.jsonl.2 audit.jsonl.1 audit.jsonl` (oldest first) reports any line
+  that was changed, removed or moved, with its file and line number. The chain continues across
+  restarts and rotations. With plain SHA-256, someone who can rewrite the whole file can also
+  recompute the hashes. With `hmac-key`, kept away from the log host, they can't. Neither detects
+  the newest lines being cut off, so also send the records to a SIEM, and compare the last hash
+  `verify` prints with the SIEM's copy.
+- **TLS syslog verifies the server's certificate and host name.** For a private CA, pass your trust
+  store (`sslSocketFactory(...)` in Java, `tlsOptions: { ca }` in JavaScript). UDP and TCP are
+  plain text, so use them only inside a trusted network.
 
 ## Developer tools: catch it while coding
 
@@ -729,9 +843,9 @@ is in [docs/OWASP-MAPPING.md](docs/OWASP-MAPPING.md).
 | A04 | Cryptographic Failures | PBKDF2 password hashing, secure tokens, constant-time compare, HMAC |
 | A05 | Injection | SQLi / XSS / command / JNDI / EL / SSTI detectors, `SafeSql`, `SafeCommand`, output encoders |
 | A06 | Insecure Design | API rate limiting, login throttling, deny-by-default, per-request inspection budget |
-| A07 | Authentication Failures | password policy, login attempt limiter, password hashing |
+| A07 | Authentication Failures | password policy, login attempt limiter, password hashing, failed and successful logins in the audit log |
 | A08 | Software or Data Integrity Failures | deserialization allowlist (Java), webhook HMAC verification |
-| A09 | Security Logging and Alerting Failures | security events for alerting (`SecurityEventListener` / `onEvent`), log sanitizer (CRLF, secret masking), incident logging |
+| A09 | Security Logging and Alerting Failures | audit log to a file or SIEM (syslog, CEF / ECS / JSON), tamper-evident hash chain, security events for alerting (`SecurityEventListener` / `onEvent`), log sanitizer (CRLF, secret masking), incident logging |
 | A10 | Mishandling of Exceptional Conditions | generic error bodies with incident ids, fail-closed filter/middleware |
 
 ### Detected attack families
@@ -769,15 +883,16 @@ malicious. Findings never contain the input text, so they are safe to log.
 | `xss-malicious.txt` / `xss-benign.txt` | 17 / 8 | detected / not flagged |
 | `path-malicious.txt` / `path-benign.txt` | 16 / 6 | detected / not flagged |
 | `cmd-malicious.txt` / `cmd-benign.txt` | 17 / 6 | detected / not flagged |
+| `audit-vectors.txt` | 11 records | byte-identical JSON, ECS and CEF lines and hash chains in Java and JavaScript |
 
 ### Test and code coverage
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 374 passed, 1 skipped\* | 83.1% | 69.4% |
-| JavaScript (`node --experimental-test-coverage`) | 82 passed | 92.6% | 82.5% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 386 passed, 1 skipped\* | 84.7% | 70.6% |
+| JavaScript (`node --experimental-test-coverage`) | 95 passed | 93.6% | 83.0% |
 | Java servlet filters (javax, jakarta) | 8 + 8 passed | not measured | not measured |
-| Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 9 passed on each | not measured | not measured |
+| Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 10 passed on each | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
 Developer Mode). The JavaScript equivalent runs and passes.
@@ -789,16 +904,17 @@ Developer Mode). The JavaScript equivalent runs and passes.
 |---|---:|---:|
 | `secure` (root) | 90.7% | 83.3% |
 | `.access` | 86.6% | 73.0% |
-| `.crypto` | 81.7% | 73.4% |
+| `.audit` (audit log, file and syslog sinks, formats, hash chain) | 89.8% | 79.9% |
+| `.crypto` | 84.2% | 75.0% |
 | `.detect` | 94.9% | 84.9% |
-| `.devtools` (scanner, probe, idor, CLI) | 74.5% | 64.1% |
+| `.devtools` (scanner, probe, idor, CLI) | 74.8% | 64.5% |
 | `.errors` | 100.0% | 100.0% |
 | `.injection` | 86.2% | 63.2% |
 | `.integrity` | 91.3% | 78.9% |
-| `.logging` | 89.3% | 75.0% |
+| `.logging` | 92.9% | 78.6% |
 | `.path` | 82.8% | 70.4% |
 | `.ssrf` | 78.6% | 55.6% |
-| `.web` (filter engine, rate limit, CORS, redirects, events) | 86.3% | 75.8% |
+| `.web` (filter engine, rate limit, CORS, redirects, events) | 87.0% | 72.8% |
 
 </details>
 

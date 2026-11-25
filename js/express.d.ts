@@ -42,6 +42,12 @@ export declare function rateLimit(
 export declare function cors(policy: CorsPolicy): Middleware;
 
 /** Sets req.user from the claims of an already verified token (default: req.auth.payload or req.auth). */
+/** User, client address, method and path of a request, to spread into audit.record(event, {...}). */
+export declare function auditFields(
+  req: Req,
+  options?: { getPrincipal?: (req: Req) => Principal | null | undefined },
+): { method?: string; path?: string; remoteAddress?: string; principalId?: string };
+
 export declare function currentUser(mapping: ClaimMapping, options?: { getClaims?: (req: Req) => Record<string, unknown> | undefined }): Middleware;
 
 export declare function errorHandler(options?: { logger?: Logger; onEvent?: EventListener | EventListener[] }): (err: unknown, req: Req, res: Res, next: Next) => void;

@@ -194,6 +194,7 @@ export class LoginAttemptLimiter {
       locked = true;
     }
     this.#moveTo(e, e.lockedUntil > now ? this.maxFailures : e.failures);
+    this.#emitAttempt(SecurityEventType.LOGIN_FAILED, key);
     if (locked && this.#lockoutListener) {
       try {
         this.#lockoutListener(securityEvent(SecurityEventType.LOGIN_LOCKED, {
@@ -214,12 +215,36 @@ export class LoginAttemptLimiter {
   }
 
   #lockoutListener = null;
+  #attemptListener = null;
+
+  /**
+   * Reports every attempt, for an audit trail: LOGIN_FAILED from recordFailure() and
+   * LOGIN_SUCCEEDED from recordSuccess(). The key is reported as the principal.
+   */
+  onAttempt(listener) {
+    this.#attemptListener = listener;
+    return this;
+  }
+
+  #emitAttempt(type, key) {
+    if (!this.#attemptListener) return;
+    try {
+      this.#attemptListener(securityEvent(type, {
+        principalId: key,
+        category: type === SecurityEventType.LOGIN_FAILED ? OwaspCategory.AUTHENTICATION_FAILURES : undefined,
+      }));
+    } catch {
+      // A broken listener must never affect authentication.
+    }
+  }
 
   recordSuccess(key) {
     const e = this.#entries.get(key);
-    if (!e) return;
-    this.#entries.delete(key);
-    this.#levels[e.level].delete(key);
+    if (e) {
+      this.#entries.delete(key);
+      this.#levels[e.level].delete(key);
+    }
+    this.#emitAttempt(SecurityEventType.LOGIN_SUCCEEDED, key);
   }
 
   /** Number of keys currently tracked (for monitoring). */

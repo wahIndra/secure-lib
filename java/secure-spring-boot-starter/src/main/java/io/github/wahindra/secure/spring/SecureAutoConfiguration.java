@@ -1,6 +1,10 @@
 package io.github.wahindra.secure.spring;
 
 import io.github.wahindra.secure.access.ClaimMapping;
+import io.github.wahindra.secure.audit.AuditLog;
+import io.github.wahindra.secure.audit.AuditSink;
+import io.github.wahindra.secure.audit.FileAuditSink;
+import io.github.wahindra.secure.audit.SyslogAuditSink;
 import io.github.wahindra.secure.servlet.jakarta.SecurityFilter;
 import io.github.wahindra.secure.web.CorsPolicy;
 import io.github.wahindra.secure.web.HttpRequestInspector;
@@ -10,6 +14,8 @@ import io.github.wahindra.secure.web.SecurityFilterEngine;
 import io.github.wahindra.secure.web.SecurityHeaders;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,10 +23,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+import org.springframework.util.StringUtils;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -29,7 +41,8 @@ import java.util.List;
  * Adding {@code secure-spring-boot-starter} to a Spring Boot 3 or 4 servlet application registers:
  * the request filter (inspection, security headers, optional CORS and rate limit) before Spring
  * Security; {@link CurrentUser} injection; safe error responses for the library's exceptions; and
- * every {@link SecurityEventListener} bean as an event listener. Configure with {@code secure.*}.
+ * every {@link SecurityEventListener} bean as an event listener; and, when configured, the audit log
+ * ({@code secure.audit.*}) with {@link Auditor}. Configure with {@code secure.*}.
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -122,6 +135,79 @@ public class SecureAutoConfiguration {
     @ConditionalOnMissingBean
     public SecureExceptionHandler secureExceptionHandler(SecurityFilterEngine engine, ClaimMapping mapping) {
         return new SecureExceptionHandler(engine, mapping);
+    }
+
+    /**
+     * The audit log, when {@code secure.audit.file.path} or {@code secure.audit.syslog.host} is set or
+     * the application defines an {@link AuditSink} bean. It is a {@link SecurityEventListener}, so the
+     * filter's events reach it; {@link Auditor} records the application's own actions.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @Conditional(AuditConfigured.class)
+    static class AuditConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        AuditLog secureAuditLog(SecureProperties props, ObjectProvider<AuditSink> sinks, Environment env) throws IOException {
+            SecureProperties.Audit a = props.getAudit();
+            AuditLog.Builder b = AuditLog.builder().queueCapacity(a.getQueueCapacity()).closeOnShutdown(false);
+            SecureProperties.Audit.File f = a.getFile();
+            if (StringUtils.hasText(f.getPath())) {
+                FileAuditSink.Builder fb = FileAuditSink.builder(Paths.get(f.getPath())).format(f.getFormat())
+                        .maxBytes(f.getMaxBytes()).maxFiles(f.getMaxFiles()).hashChain(f.isHashChain());
+                if (StringUtils.hasText(f.getHmacKey())) {
+                    fb.hmacKey(f.getHmacKey().getBytes(StandardCharsets.UTF_8));
+                }
+                b.sink(fb.build());
+            }
+            SecureProperties.Audit.Syslog s = a.getSyslog();
+            if (StringUtils.hasText(s.getHost())) {
+                int port = s.getPort() != null ? s.getPort() : s.getProtocol() == SyslogAuditSink.Protocol.TLS ? 6514 : 514;
+                String app = s.getAppName() != null ? s.getAppName() : env.getProperty("spring.application.name", "secure");
+                b.sink(SyslogAuditSink.builder(s.getHost(), port).protocol(s.getProtocol()).format(s.getFormat())
+                        .appName(app).facility(s.getFacility()).build());
+            }
+            sinks.orderedStream().forEach(b::sink);
+            return b.build();
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        Auditor secureAuditor(AuditLog log, ClaimMapping mapping) {
+            return new Auditor(log, mapping);
+        }
+
+        /** Separate, so the Spring Security types are only loaded when Spring Security is present. */
+        @Configuration(proxyBeanMethods = false)
+        @ConditionalOnClass(name = "org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent")
+        @ConditionalOnProperty(prefix = "secure.audit", name = "authentication-failures", havingValue = "true", matchIfMissing = true)
+        static class AuthenticationAudit {
+
+            @Bean
+            AuthenticationFailureAudit secureAuthenticationFailureAudit(AuditLog log) {
+                return new AuthenticationFailureAudit(log);
+            }
+        }
+    }
+
+    /** Any one of: a file path, a syslog host, or an {@link AuditSink} bean. */
+    static class AuditConfigured extends AnyNestedCondition {
+
+        AuditConfigured() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnProperty(prefix = "secure.audit.file", name = "path")
+        static class FilePath {
+        }
+
+        @ConditionalOnProperty(prefix = "secure.audit.syslog", name = "host")
+        static class SyslogHost {
+        }
+
+        @ConditionalOnBean(AuditSink.class)
+        static class CustomSink {
+        }
     }
 
     /** {@link CurrentUser} needs Spring Security to know who is logged in. */

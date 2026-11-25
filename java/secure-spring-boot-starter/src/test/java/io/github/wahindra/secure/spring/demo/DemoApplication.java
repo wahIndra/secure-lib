@@ -8,6 +8,8 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import io.github.wahindra.secure.access.AccessGuard;
 import io.github.wahindra.secure.access.SecurityPrincipal;
+import io.github.wahindra.secure.audit.AuditRecord;
+import io.github.wahindra.secure.spring.Auditor;
 import io.github.wahindra.secure.spring.CurrentUser;
 import io.github.wahindra.secure.web.SafeRedirect;
 import io.github.wahindra.secure.web.SecurityEvent;
@@ -115,6 +117,11 @@ public class DemoApplication {
         private final Map<Long, Order> orders = Map.of(
                 1L, new Order(1, "alice", "alice@shop.test"),
                 2L, new Order(2, "bob", "bob@shop.test"));
+        private final org.springframework.beans.factory.ObjectProvider<Auditor> auditor;
+
+        Api(org.springframework.beans.factory.ObjectProvider<Auditor> auditor) {
+            this.auditor = auditor;
+        }
 
         /** Vulnerable on purpose: reflects the query unencoded (XSS). The starter must block attacks. */
         @GetMapping("/api/search")
@@ -143,6 +150,14 @@ public class DemoApplication {
         @GetMapping("/api/vuln/orders/{id}")
         Order vulnerableOrder(@PathVariable long id) {
             return orders.get(id);
+        }
+
+        /** An application action recorded in the audit log, when one is configured. */
+        @PostMapping("/api/orders/{id}/refund")
+        Map<String, Object> refund(@PathVariable long id, @CurrentUser SecurityPrincipal user) {
+            Order order = order(id, user);
+            auditor.ifAvailable(a -> a.record("order.refund", "order/" + order.id(), AuditRecord.Outcome.SUCCESS));
+            return Map.of("refunded", order.id());
         }
 
         @GetMapping("/api/me")

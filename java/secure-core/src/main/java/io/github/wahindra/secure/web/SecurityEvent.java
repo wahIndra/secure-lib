@@ -25,6 +25,10 @@ public final class SecurityEvent {
         CORS_REJECTED,
         ACCESS_DENIED,
         LOGIN_LOCKED,
+        /** A failed login, from {@code LoginAttemptLimiter.onAttempt}. */
+        LOGIN_FAILED,
+        /** A successful login, from {@code LoginAttemptLimiter.onAttempt}. */
+        LOGIN_SUCCEEDED,
         /** Inspection itself failed; the request was rejected unless the filter fails open. */
         INSPECTION_ERROR
     }

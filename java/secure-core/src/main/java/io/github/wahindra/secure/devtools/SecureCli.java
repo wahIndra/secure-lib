@@ -1,6 +1,7 @@
 package io.github.wahindra.secure.devtools;
 
 import io.github.wahindra.secure.InputInspector;
+import io.github.wahindra.secure.audit.AuditChain;
 import io.github.wahindra.secure.detect.DetectionResult;
 import io.github.wahindra.secure.detect.Finding;
 import io.github.wahindra.secure.detect.NormalizedInput;
@@ -26,6 +27,7 @@ import java.util.Set;
  * java -jar secure-core.jar check "1;SELECT pg_sleep(5)--"
  * java -jar secure-core.jar probe "http://localhost:8080/api/orders?id=FUZZ"
  * java -jar secure-core.jar idor http://localhost:8080/api/orders/42 --as-owner "Authorization: Bearer A" --as-other "Authorization: Bearer B"
+ * java -jar secure-core.jar audit verify audit.jsonl.1 audit.jsonl
  * java -jar secure-core.jar rules
  * </pre>
  */
@@ -76,6 +78,9 @@ public final class SecureCli {
         }
         if ("idor".equals(cmd)) {
             return idor(rest, out);
+        }
+        if ("audit".equals(cmd)) {
+            return audit(rest, out);
         }
         if ("rules".equals(cmd)) {
             for (ScanRule r : ScanRule.defaults()) {
@@ -297,6 +302,44 @@ public final class SecureCli {
         return args.get(i);
     }
 
+    /** {@code audit verify FILE... [--key-env NAME]}: exit 0 intact, 1 tampering found. */
+    private static int audit(List<String> args, PrintStream out) throws IOException {
+        if (args.isEmpty() || !"verify".equals(args.get(0))) {
+            throw new IllegalArgumentException("usage: audit verify <file>... [--key-env NAME]");
+        }
+        List<Path> files = new ArrayList<Path>();
+        byte[] key = null;
+        for (int i = 1; i < args.size(); i++) {
+            String a = args.get(i);
+            if ("--key-env".equals(a)) {
+                if (i + 1 >= args.size()) {
+                    throw new IllegalArgumentException("--key-env needs the name of an environment variable");
+                }
+                String name = args.get(++i);
+                String v = System.getenv(name);
+                if (v == null || v.isEmpty()) {
+                    throw new IllegalArgumentException("environment variable " + name + " is not set");
+                }
+                key = v.getBytes(StandardCharsets.UTF_8);
+            } else {
+                files.add(Paths.get(a));
+            }
+        }
+        if (files.isEmpty()) {
+            throw new IllegalArgumentException("usage: audit verify <file>... [--key-env NAME] (oldest file first)");
+        }
+        AuditChain.Result r = new AuditChain(key).verify(files);
+        for (String n : r.getNotes()) {
+            out.println("note: " + n);
+        }
+        for (String p : r.getProblems()) {
+            out.println("TAMPERED: " + p);
+        }
+        out.println(r.getRecords() + " record(s), " + (r.isIntact() ? "chain intact" : r.getProblems().size() + " problem(s)")
+                + (r.getLastHash() != null ? "; last hash " + r.getLastHash() : ""));
+        return r.isIntact() ? 0 : 1;
+    }
+
     private static String printable(String s) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < s.length() && i < 300; i++) {
@@ -331,6 +374,8 @@ public final class SecureCli {
                     + "      -X, --method / -d, --data        as for probe\n"
                     + "      --no-anonymous                   skip the request without credentials\n"
                     + "      --allow-remote                   allow non-local targets you are authorized to test\n"
+                    + "  audit verify <file>...    Check an audit log's hash chain (oldest file first)\n"
+                    + "      --key-env NAME                   HMAC key from this environment variable\n"
                     + "  rules                     List the scan rules\n"
                     + "\n"
                     + "Exit codes: 0 ok, 1 findings, 2 usage error.\n";

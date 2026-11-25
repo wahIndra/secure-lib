@@ -5,6 +5,23 @@ is published to Maven Central (`io.github.wahindra:*`) and npm (`@wahindra/secur
 
 ## [Unreleased]
 
+### Added
+- **Audit log** (Java `io.github.wahindra.secure.audit`, JavaScript `AuditLog`): security events and
+  application actions written to a **file** at a path you choose (rotating by size, owner-only
+  permissions), to a **syslog / SIEM** collector over UDP, TCP or TLS (RFC 5424 / 5425), or to your
+  own sink. Formats: JSON, **ECS** (Elastic) and **CEF** (ArcSight, QRadar, Microsoft Sentinel).
+  Java and JavaScript write byte-identical lines (shared test vectors). Recording never blocks or
+  breaks a request: a bounded queue and one background writer, with drops counted.
+- **Tamper-evident hash chain** (SHA-256, or HMAC-SHA256 with a key) on audit files, continued across
+  restarts and rotation, and `secure audit verify` to find any changed, removed or reordered line.
+- **Application audit events**: `audit.record("order.refund", ...)`. In Spring Boot, the `Auditor`
+  bean fills in the user from the verified token and the request details; in Express, `auditFields(req)`.
+- **Login events**: `LOGIN_FAILED` and `LOGIN_SUCCEEDED` from `LoginAttemptLimiter.onAttempt(...)`.
+  The Spring Boot starter also records failed logins and invalid bearer tokens reported by Spring
+  Security (without the token).
+- **Spring Boot**: `secure.audit.file.*` and `secure.audit.syslog.*`; the audit log is on as soon as a
+  path or host is set, or an `AuditSink` bean exists.
+
 ### Changed
 - **Node.js 18+** for `@wahindra/secure` (was 20+). CI now also runs the tests on Node 18.
 

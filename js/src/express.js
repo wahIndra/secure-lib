@@ -38,6 +38,15 @@ const eventBase = (req) => ({
 });
 
 /**
+ * The request's audit fields: user (from currentUser() / req.user), client address, method and
+ * path. audit.record('order.refund', { ...auditFields(req), resource: 'order/' + id })
+ */
+export function auditFields(req, { getPrincipal = (r) => r.user } = {}) {
+  const p = getPrincipal(req);
+  return { ...eventBase(req), principalId: p?.id ?? undefined };
+}
+
+/**
  * Same pipeline as the Java SecurityFilterEngine, in this order: security headers; CORS
  * (preflights answered with 204/403); rate limit (429 with Retry-After); inspection of path,
  * query, parsed body and selected headers within a budget. In 'block' mode malicious requests get

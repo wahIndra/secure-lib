@@ -1,5 +1,7 @@
 package io.github.wahindra.secure.spring;
 
+import io.github.wahindra.secure.audit.AuditFormat;
+import io.github.wahindra.secure.audit.SyslogAuditSink;
 import io.github.wahindra.secure.web.HttpRequestInspector;
 import io.github.wahindra.secure.web.SecurityFilterEngine;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -24,6 +26,13 @@ import java.util.List;
  *   rate-limit:
  *     enabled: true
  *     requests-per-minute: 300
+ *   audit:
+ *     file:
+ *       path: /var/log/orders/security-audit.jsonl
+ *       hash-chain: true
+ *     syslog:
+ *       host: siem.example.com
+ *       protocol: tls
  * </pre>
  */
 @ConfigurationProperties(prefix = "secure")
@@ -46,6 +55,7 @@ public class SecureProperties {
     private final RateLimit rateLimit = new RateLimit();
     private final Cors cors = new Cors();
     private final Identity identity = new Identity();
+    private final Audit audit = new Audit();
 
     public static class Inspection {
         /** Inspect JSON request bodies (read once, then replayed to the application). */
@@ -111,6 +121,82 @@ public class SecureProperties {
     }
 
     /** How {@code @CurrentUser} reads a verified token: which issuer and where it keeps roles. */
+    /**
+     * Audit log of security events, logins and application actions ({@code Auditor}). Turned on by
+     * setting a file path or a syslog host (or by an {@code AuditSink} bean of your own).
+     */
+    public static class Audit {
+        /** Records held while the destinations catch up; beyond this they are dropped and counted. */
+        private int queueCapacity = 10_000;
+        /** Also record failed bearer-token / login authentication reported by Spring Security. */
+        private boolean authenticationFailures = true;
+        private final File file = new File();
+        private final Syslog syslog = new Syslog();
+
+        public int getQueueCapacity() { return queueCapacity; }
+        public void setQueueCapacity(int v) { queueCapacity = v; }
+        public boolean isAuthenticationFailures() { return authenticationFailures; }
+        public void setAuthenticationFailures(boolean v) { authenticationFailures = v; }
+        public File getFile() { return file; }
+        public Syslog getSyslog() { return syslog; }
+
+        public static class File {
+            /** Where to write, e.g. {@code /var/log/orders/security-audit.jsonl}. Empty: no file. */
+            private String path;
+            /** {@code json}, {@code ecs} or {@code cef}. */
+            private AuditFormat format = AuditFormat.JSON;
+            /** Rotate when the file would grow past this many bytes (0: never). */
+            private long maxBytes = 10L * 1024 * 1024;
+            /** Rotated files to keep. */
+            private int maxFiles = 10;
+            /** Add a hash chain to every line; check it with {@code secure audit verify}. */
+            private boolean hashChain;
+            /** HMAC key for the chain (at least 16 characters; implies hash-chain). Keep it in a secret store. */
+            private String hmacKey;
+
+            public String getPath() { return path; }
+            public void setPath(String v) { path = v; }
+            public AuditFormat getFormat() { return format; }
+            public void setFormat(AuditFormat v) { format = v; }
+            public long getMaxBytes() { return maxBytes; }
+            public void setMaxBytes(long v) { maxBytes = v; }
+            public int getMaxFiles() { return maxFiles; }
+            public void setMaxFiles(int v) { maxFiles = v; }
+            public boolean isHashChain() { return hashChain; }
+            public void setHashChain(boolean v) { hashChain = v; }
+            public String getHmacKey() { return hmacKey; }
+            public void setHmacKey(String v) { hmacKey = v; }
+        }
+
+        public static class Syslog {
+            /** SIEM / syslog collector host. Empty: no syslog. */
+            private String host;
+            /** Default: 514 for UDP and TCP, 6514 for TLS. */
+            private Integer port;
+            /** {@code udp}, {@code tcp} or {@code tls}. Use TLS across networks. */
+            private SyslogAuditSink.Protocol protocol = SyslogAuditSink.Protocol.UDP;
+            /** {@code cef} (ArcSight, QRadar, Sentinel), {@code ecs} or {@code json}. */
+            private AuditFormat format = AuditFormat.CEF;
+            /** RFC 5424 APP-NAME. Default: spring.application.name, else "secure". */
+            private String appName;
+            /** Syslog facility 0..23 (13: log audit). */
+            private int facility = 13;
+
+            public String getHost() { return host; }
+            public void setHost(String v) { host = v; }
+            public Integer getPort() { return port; }
+            public void setPort(Integer v) { port = v; }
+            public SyslogAuditSink.Protocol getProtocol() { return protocol; }
+            public void setProtocol(SyslogAuditSink.Protocol v) { protocol = v; }
+            public AuditFormat getFormat() { return format; }
+            public void setFormat(AuditFormat v) { format = v; }
+            public String getAppName() { return appName; }
+            public void setAppName(String v) { appName = v; }
+            public int getFacility() { return facility; }
+            public void setFacility(int v) { facility = v; }
+        }
+    }
+
     public static class Identity {
         public enum Provider { STANDARD, KEYCLOAK, AUTH0, ENTRA_ID, OKTA, COGNITO }
 
@@ -152,4 +238,5 @@ public class SecureProperties {
     public RateLimit getRateLimit() { return rateLimit; }
     public Cors getCors() { return cors; }
     public Identity getIdentity() { return identity; }
+    public Audit getAudit() { return audit; }
 }

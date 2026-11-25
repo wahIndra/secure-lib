@@ -2,6 +2,7 @@
 // secure: developer tools for @wahindra/secure. Run `secure help` for usage.
 import fs from 'node:fs';
 import { SourceScanner, DEFAULT_EXCLUDED_DIRS, defaultRules, atLeast, toText, toJson, toSarif, explain, probe, idorProbe } from '../src/devtools.js';
+import { AuditChain } from '../src/audit.js';
 
 const USAGE = `secure: developer tools for the secure library
 
@@ -27,6 +28,8 @@ const USAGE = `secure: developer tools for the secure library
       -X, --method / -d, --data        as for probe
       --no-anonymous                   skip the request without credentials
       --allow-remote                   allow non-local targets you are authorized to test
+  audit verify <file>...    Check an audit log's hash chain (oldest file first)
+      --key-env NAME                   HMAC key from this environment variable
   rules                     List the scan rules
 
 Exit codes: 0 ok, 1 findings, 2 usage error.
@@ -156,6 +159,27 @@ async function idorCmd(args) {
   return results.some((r) => r.severity === 'HIGH' || r.severity === 'MEDIUM') ? 1 : 0;
 }
 
+function auditCmd(args) {
+  if (args[0] !== 'verify') throw new UsageError('usage: audit verify <file>... [--key-env NAME]');
+  const files = [];
+  let key = null;
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--key-env') {
+      const name = value(args, ++i, '--key-env');
+      if (!process.env[name]) throw new UsageError(`environment variable ${name} is not set`);
+      key = Buffer.from(process.env[name], 'utf8');
+    } else {
+      files.push(args[i]);
+    }
+  }
+  if (!files.length) throw new UsageError('usage: audit verify <file>... [--key-env NAME] (oldest file first)');
+  const r = new AuditChain(key).verify(files);
+  for (const n of r.notes) console.log(`note: ${n}`);
+  for (const p of r.problems) console.log(`TAMPERED: ${p}`);
+  console.log(`${r.records} record(s), ${r.intact ? 'chain intact' : `${r.problems.length} problem(s)`}${r.lastHash ? `; last hash ${r.lastHash}` : ''}`);
+  return r.intact ? 0 : 1;
+}
+
 async function main(argv) {
   const [cmd, ...rest] = argv;
   if (!cmd || ['help', '--help', '-h'].includes(cmd)) {
@@ -166,6 +190,7 @@ async function main(argv) {
   if (cmd === 'check') return check(rest);
   if (cmd === 'probe') return probeCmd(rest);
   if (cmd === 'idor') return idorCmd(rest);
+  if (cmd === 'audit') return auditCmd(rest);
   if (cmd === 'rules') {
     for (const r of defaultRules()) {
       console.log(`${r.id.padEnd(28)} ${r.severity.padEnd(6)} ${r.owasp.id2025.padEnd(9)} ${[...r.langs].join(',').padEnd(22)} ${r.message}`);
