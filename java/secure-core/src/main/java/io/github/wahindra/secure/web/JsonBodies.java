@@ -16,7 +16,7 @@ import java.util.Set;
  * Decodes a JSON request body every way the application's parser might, so that inspection and
  * parsing cannot disagree. Jackson (Spring) detects UTF-8/16/32 from the first bytes, as the JSON
  * RFCs allow; other code honours the declared {@code charset}. Both readings are returned, each
- * decoded strictly. A body that does not decode cleanly in any of them is rejected by the caller.
+ * decoded strictly. If any of them fails to decode cleanly, the body is rejected by the caller.
  */
 final class JsonBodies {
 
@@ -27,7 +27,7 @@ final class JsonBodies {
     }
 
     /**
-     * @return the distinct strict decodings, or an empty list if none succeeded (fail closed)
+     * @return the distinct strict decodings, or an empty list if any failed (fail closed)
      */
     static List<String> decode(byte[] body, String declaredCharset) {
         Set<Charset> candidates = new LinkedHashSet<Charset>();
@@ -39,9 +39,12 @@ final class JsonBodies {
         Set<String> out = new LinkedHashSet<String>();
         for (Charset cs : candidates) {
             String text = strict(body, bomLength(body, cs), cs);
-            if (text != null) {
-                out.add(text);
+            if (text == null) {
+                // The application may still decode this reading leniently, and we would not have
+                // inspected what it sees. Fail closed rather than drop the reading.
+                return new ArrayList<String>();
             }
+            out.add(text);
         }
         return new ArrayList<String>(out);
     }

@@ -112,9 +112,10 @@ public final class SecurityFilterEngine {
             return false;
         }
         // Any method: Spring binds @RequestBody on GET too, so a body on GET must not skip inspection.
-        boolean hasBody = request.contentLength() > 0 || request.header("Transfer-Encoding") != null;
+        // Only an explicit Content-Length: 0 means "no body". An unknown length (-1) must be read:
+        // HTTP/2 needs neither Content-Length nor Transfer-Encoding, and the app still parses the body.
         String ct = request.contentType();
-        if (!hasBody || ct == null) {
+        if (request.contentLength() == 0 || ct == null) {
             return false;
         }
         String t = ct.toLowerCase(Locale.ROOT);
@@ -124,7 +125,7 @@ public final class SecurityFilterEngine {
     /**
      * Preferred entry point for adapters: the raw JSON body bytes, decoded here every way the
      * application might decode them (encoding detected from the bytes as Jackson does, and the
-     * declared charset), strictly. Each decoding is inspected. A body that decodes cleanly in none
+     * declared charset), strictly. Each decoding is inspected. A body that fails to decode cleanly in any
      * of them is treated as malicious, so inspection and the application's parser cannot disagree.
      */
     public Verdict evaluateBody(RequestView request, byte[] jsonBody, boolean bodyTooLarge) {

@@ -774,7 +774,7 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 372 passed, 1 skipped\* | 83.1% | 69.4% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 374 passed, 1 skipped\* | 83.1% | 69.4% |
 | JavaScript (`node --experimental-test-coverage`) | 82 passed | 92.6% | 82.5% |
 | Java servlet filters (javax, jakarta) | 8 + 8 passed | not measured | not measured |
 | Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 9 passed on each | not measured | not measured |

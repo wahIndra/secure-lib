@@ -18,9 +18,10 @@ is published to Maven Central (`io.github.wahindra:*`) and npm (`@wahindra/secur
 - **IDOR / BOLA checks**: scan rule `IDOR_IDENTITY_FROM_REQUEST` (user id taken from the
   request instead of the token), and `secure idor`, which fetches an object as its owner, as
   another user and logged out.
-- **JSON body inspection** in the servlet filters, for any HTTP method. The body is read once,
-  decoded the way Jackson does (UTF-8/16/32 detected from the bytes, plus the declared charset,
-  strictly), inspected, and replayed unchanged to the application. Undecodable bodies are rejected.
+- **JSON body inspection** in the servlet filters, for any HTTP method and also when the length
+  is unknown (HTTP/2 needs no `Content-Length`). The body is read once, decoded the way Jackson
+  does (UTF-8/16/32 detected from the bytes, plus the declared charset, strictly), inspected, and
+  replayed unchanged to the application. A body that fails any of these decodings is rejected.
 - **Per-request inspection budget** (values, characters, nesting depth). A request over the
   budget counts as malicious instead of being partly skipped.
 - **Rate limiting** for any endpoint: `RateLimiter` (token bucket per key, bounded memory, 429

@@ -253,7 +253,7 @@ class ApiProtectionTest {
         SecurityFilterEngine engine = SecurityFilterEngine.builder().maxBodyBytes(100).build();
         Req post = new Req("POST", "/api/search").header("Content-Type", "application/json; charset=utf-8").header("Content-Length", "20");
         assertTrue(engine.wantsBody(post));
-        assertFalse(engine.wantsBody(new Req("GET", "/x").header("Content-Type", "application/json")), "GET without a body");
+        assertFalse(engine.wantsBody(new Req("GET", "/x").header("Content-Type", "application/json").header("Content-Length", "0")), "GET without a body");
         assertFalse(engine.wantsBody(new Req("POST", "/x").header("Content-Type", "multipart/form-data").header("Content-Length", "9")));
         assertEquals(400, engine.evaluate(post, "{\"q\":\"' OR 1=1--\"}", false).getStatus());
         assertTrue(engine.evaluate(post, "{\"q\":\"shoes\"}", false).isProceed());
@@ -302,8 +302,30 @@ class ApiProtectionTest {
         Req get = new Req("GET", "/api/search").header("Content-Type", "application/json").header("Content-Length", "20");
         assertTrue(engine.wantsBody(get), "Spring binds @RequestBody on GET");
         assertEquals(400, engine.evaluateBody(get, "{\"q\":\"' OR 1=1--\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), false).getStatus());
-        assertFalse(engine.wantsBody(new Req("GET", "/api/search").header("Content-Type", "application/json")), "no body: nothing to read");
+        assertFalse(engine.wantsBody(new Req("GET", "/api/search").header("Content-Type", "application/json").header("Content-Length", "0")), "no body: nothing to read");
         assertTrue(engine.wantsBody(new Req("POST", "/x").header("Content-Type", "application/json").header("Transfer-Encoding", "chunked")));
+    }
+
+    /** HTTP/2 needs neither Content-Length nor Transfer-Encoding, and the app still parses the body. */
+    @Test
+    void jsonBodyOfUnknownLengthIsRead() {
+        SecurityFilterEngine engine = SecurityFilterEngine.defaults();
+        Req h2 = new Req("POST", "/api/search").header("Content-Type", "application/json");
+        assertTrue(engine.wantsBody(h2), "unknown length must be read");
+        assertEquals(400, engine.evaluateBody(h2, "{\"q\":\"' OR 1=1--\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), false).getStatus());
+        assertTrue(engine.evaluateBody(new Req("GET", "/api/search").header("Content-Type", "application/json"), new byte[0], false).isProceed(),
+                "reading turned up no body: the request passes");
+    }
+
+    /** The app may decode the declared charset leniently; a reading that fails strictly is rejected, not dropped. */
+    @Test
+    void bodyThatFailsTheDeclaredCharsetIsRejected() {
+        byte[] utf8 = "{\"q\":\"café\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        SecurityFilterEngine engine = SecurityFilterEngine.defaults();
+        assertTrue(engine.evaluateBody(new Req("POST", "/api").header("Content-Type", "application/json; charset=utf-8")
+                .header("Content-Length", "1"), utf8, false).isProceed(), "honest declaration passes");
+        assertEquals(400, engine.evaluateBody(new Req("POST", "/api").header("Content-Type", "application/json; charset=us-ascii")
+                .header("Content-Length", "1"), utf8, false).getStatus(), "declared charset cannot decode it");
     }
 
     @Test
