@@ -5,9 +5,9 @@
 [![npm](https://img.shields.io/npm/v/@wahindra/secure)](https://www.npmjs.com/package/@wahindra/secure)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Java 8+](https://img.shields.io/badge/java-8%2B-orange)
-![Node 20+](https://img.shields.io/badge/node-20%2B-green)
+![Node 18+](https://img.shields.io/badge/node-18%2B-green)
 
-OWASP Top 10 prevention helpers for **Java 8+** and **Node.js 20+**, with zero runtime dependencies.
+OWASP Top 10 prevention helpers for **Java 8+** and **Node.js 18+**, with zero runtime dependencies.
 
 ```xml
 <!-- Maven: Spring Boot 3 / Jakarta EE (see Install below for other stacks) -->
@@ -86,7 +86,7 @@ every push and pull request (see [Continuous integration](#continuous-integratio
 | Java 17 | Temurin 17 | Temurin and Microsoft 17.0.15 |
 | Java 21 | Temurin 21 (Linux + Windows) | Temurin 21.0.7 |
 | Java 25 | Temurin 25 | Oracle 25.0.2 |
-| Node.js 20 / 22 | 20, 22 | 21.6.2 |
+| Node.js 18 / 20 / 22 | 18, 20, 22 | 18.20.8, 21.6.2 |
 | Node.js 24 / 26 | 24 (Linux + Windows), 26 | 24.22.1, 26.12.1 |
 | Spring Boot 3.5 (starter) | end-to-end tests on Java 17, 21, 25 | Temurin 21 |
 | Spring Boot 4.2 (starter) | end-to-end tests on Java 21 | Temurin 21 |
@@ -284,7 +284,7 @@ if (r.isMalicious()) { /* reject; log r.getFindings() */ }
 npm install @wahindra/secure
 ```
 
-ESM only, Node.js 20+, no dependencies, TypeScript types included. To work on the library itself:
+ESM only, Node.js 18+, no dependencies, TypeScript types included. To work on the library itself:
 
 ```bash
 cd js
@@ -878,7 +878,7 @@ rescan the input from every position are bounded, and normalization skips work f
 | Job | What it checks |
 |---|---|
 | **Java** | `mvn verify` on Temurin 8, 11, 17, 21 and 25 (Linux) and 21 (Windows). On Java 17+ this includes the Spring Boot starter and its end-to-end tests (Spring Boot 3.5). Java 21 also produces the JaCoCo report (downloadable artifact `jacoco-report`). Surefire reports are uploaded when a job fails. |
-| **Node** | `npm test` on Node 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, type-checks the TypeScript definitions, and fails if npm would rewrite `package.json` at publish time. |
+| **Node** | `npm test` on Node 18, 20, 22, 24 and 26 (Linux) and 24 (Windows). Node 24 also runs coverage, checks that the npm package contains the CLI and the shared rule files, type-checks the TypeScript definitions, and fails if npm would rewrite `package.json` at publish time. |
 | **Spring Boot 4 starter** | The starter's end-to-end tests again, against Spring Boot 4.2 (`-Dspring-boot.version=4.2.0`). |
 | **Security scan** | The repository scans itself with `secure scan`. Results appear under *Security → Code scanning* (SARIF), and the job fails on any HIGH finding. |
 | **Java and JavaScript agree** | Both CLIs scan the shared fixtures, and `.github/scripts/compare-scanners.mjs` fails if their findings differ. |

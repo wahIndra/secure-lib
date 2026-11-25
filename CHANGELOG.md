@@ -3,6 +3,11 @@
 All notable changes. Versions follow [semantic versioning](https://semver.org); the same version
 is published to Maven Central (`io.github.wahindra:*`) and npm (`@wahindra/secure`).
 
+## [Unreleased]
+
+### Changed
+- **Node.js 18+** for `@wahindra/secure` (was 20+). CI now also runs the tests on Node 18.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
@@ -57,5 +62,6 @@ commands, output encoding, password hashing, CSRF, HMAC, safe deserialization, l
 safe errors), javax and jakarta servlet filters, Express middleware, and the developer tools
 `secure scan`, `secure check` and `secure probe`.
 
+[Unreleased]: https://github.com/wahIndra/secure-lib/compare/v0.2.0...main
 [0.2.0]: https://github.com/wahIndra/secure-lib/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/wahIndra/secure-lib/releases/tag/v0.1.0

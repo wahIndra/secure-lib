@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@wahindra/secure)](https://www.npmjs.com/package/@wahindra/secure)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/wahIndra/secure-lib/blob/main/LICENSE)
 
-OWASP Top 10 protection for Node.js 20+: request inspection middleware for Express (or any
+OWASP Top 10 protection for Node.js 18+: request inspection middleware for Express (or any
 `(req, res, next)` stack), access-control guards, identity from any OIDC provider, rate
 limiting, strict CORS, SSRF and path-traversal guards, password hashing, and a CLI that finds
 vulnerable code and attacks your local app before you deploy. Zero dependencies, ESM, with
