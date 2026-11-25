@@ -28,7 +28,7 @@ import java.util.logging.Logger;
  * </ol>
  *
  * <p>Adapters read the JSON body themselves (only they can replay it to the application) and
- * pass it to {@link #evaluate(RequestView, String, boolean)}.
+ * pass it to {@link #evaluateBody(RequestView, byte[], boolean)}.
  */
 public final class SecurityFilterEngine {
 
@@ -111,16 +111,44 @@ public final class SecurityFilterEngine {
         if (!inspectJsonBody) {
             return false;
         }
-        String m = request.method() == null ? "" : request.method().toUpperCase(Locale.ROOT);
-        if ("GET".equals(m) || "HEAD".equals(m) || "OPTIONS".equals(m) || "TRACE".equals(m)) {
-            return false;
-        }
+        // Any method: Spring binds @RequestBody on GET too, so a body on GET must not skip inspection.
+        boolean hasBody = request.contentLength() > 0 || request.header("Transfer-Encoding") != null;
         String ct = request.contentType();
-        if (ct == null) {
+        if (!hasBody || ct == null) {
             return false;
         }
         String t = ct.toLowerCase(Locale.ROOT);
         return t.startsWith("application/json") || t.contains("+json");
+    }
+
+    /**
+     * Preferred entry point for adapters: the raw JSON body bytes, decoded here every way the
+     * application might decode them (encoding detected from the bytes as Jackson does, and the
+     * declared charset), strictly. Each decoding is inspected. A body that decodes cleanly in none
+     * of them is treated as malicious, so inspection and the application's parser cannot disagree.
+     */
+    public Verdict evaluateBody(RequestView request, byte[] jsonBody, boolean bodyTooLarge) {
+        if (jsonBody == null || bodyTooLarge) {
+            return evaluate(request, (String) null, bodyTooLarge);
+        }
+        List<String> decodings = JsonBodies.decode(jsonBody, charsetOf(request.contentType()));
+        if (decodings.isEmpty()) {
+            return evaluateDecodings(request, Collections.<String>emptyList(), true, "json-body-undecodable");
+        }
+        return evaluateDecodings(request, decodings, false, null);
+    }
+
+    private static String charsetOf(String contentType) {
+        if (contentType == null) {
+            return null;
+        }
+        for (String part : contentType.split(";")) {
+            String p = part.trim();
+            if (p.toLowerCase(Locale.ROOT).startsWith("charset=")) {
+                return p.substring("charset=".length());
+            }
+        }
+        return null;
     }
 
     /** Bytes the adapter should read at most; reading one byte more tells it the body is too large. */
@@ -135,6 +163,12 @@ public final class SecurityFilterEngine {
      *                     and the request counts as malicious (fail closed)
      */
     public Verdict evaluate(RequestView request, String jsonBody, boolean bodyTooLarge) {
+        return evaluateDecodings(request, jsonBody == null ? Collections.<String>emptyList() : Collections.singletonList(jsonBody),
+                bodyTooLarge, bodyTooLarge ? "json-body-too-large" : null);
+    }
+
+    private Verdict evaluateDecodings(RequestView request, List<String> bodies, boolean rejectBody, String bodyReason) {
+        boolean bodyTooLarge = rejectBody;
         Map<String, String> headers = new LinkedHashMap<String, String>();
         if (securityHeaders != null) {
             headers.putAll(securityHeaders.asMap());
@@ -171,7 +205,15 @@ public final class SecurityFilterEngine {
 
         HttpRequestInspector.Report report;
         try {
-            report = inspector.inspect(request.rawPath(), request.parameters(), request.headers(), bodyTooLarge ? null : jsonBody);
+            report = inspector.inspect(request.rawPath(), request.parameters(), request.headers(),
+                    bodyTooLarge || bodies.isEmpty() ? null : bodies.get(0));
+            // Further decodings of the same body (e.g. UTF-16 detected vs. declared UTF-8): inspect each one.
+            for (int i = 1; i < bodies.size() && !bodyTooLarge && !report.isMalicious(); i++) {
+                HttpRequestInspector.Report alt = inspector.inspect(null, null, null, bodies.get(i));
+                if (alt.isSuspicious()) {
+                    report = alt;
+                }
+            }
         } catch (RuntimeException e) {
             String id = SafeErrors.log(LOG, e, "request inspection failed");
             emit(event(SecurityEvent.Type.INSPECTION_ERROR, id, request).detail(e.getClass().getSimpleName()).build());
@@ -184,7 +226,7 @@ public final class SecurityFilterEngine {
             String id = SafeErrors.newIncidentId();
             boolean block = mode == Mode.BLOCK && malicious;
             SecurityEvent.Builder ev = event(block ? SecurityEvent.Type.REQUEST_BLOCKED : SecurityEvent.Type.REQUEST_FLAGGED, id, request)
-                    .detail((bodyTooLarge ? "json-body-too-large" + (report.isSuspicious() ? ", " : "") : "") + report.summary());
+                    .detail((bodyTooLarge ? bodyReason + (report.isSuspicious() ? ", " : "") : "") + report.summary());
             OwaspCategory category = null;
             for (Finding f : report.getFindings()) {
                 ev.ruleId(f.getRuleId());

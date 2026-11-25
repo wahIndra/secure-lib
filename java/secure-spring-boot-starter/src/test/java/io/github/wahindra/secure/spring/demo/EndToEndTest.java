@@ -67,6 +67,20 @@ class EndToEndTest {
         assertEquals("<p>Results for shoes</p>", clean.body(), "the body is replayed to Spring unchanged");
     }
 
+    /** Jackson auto-detects UTF-16/32; the filter must read the body the same way, or the payload slips through. */
+    @Test
+    void encodedJsonBodyCannotBypassInspection() throws Exception {
+        String attack = "{\"q\":\"<script>alert(1)</script>\"}";
+        for (java.nio.charset.Charset cs : new java.nio.charset.Charset[] {java.nio.charset.StandardCharsets.UTF_16LE,
+                java.nio.charset.StandardCharsets.UTF_16BE, java.nio.charset.Charset.forName("UTF-32BE")}) {
+            java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/api/search"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(attack.getBytes(cs))).build();
+            HttpResponse<String> r = java.net.http.HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, r.statusCode(), cs + " body must be blocked, got: " + r.body());
+        }
+    }
+
     @Test
     void idorCheckPassesOnTheCorrectEndpointAndFailsOnTheBrokenOne() throws Exception {
         for (IdorProbe.Result r : IdorProbe.run(target("/api/orders/1"))) {

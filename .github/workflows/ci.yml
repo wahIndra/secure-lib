@@ -45,6 +45,11 @@ jobs:
         shell: bash
         run: mvn -B -ntp verify ${{ matrix.java == '21' && matrix.os == 'ubuntu-latest' && '-Pcoverage' || '' }}
 
+      - name: Report failed tests
+        if: failure()
+        shell: bash
+        run: node .github/scripts/report-test-failures.mjs java
+
       - name: Upload coverage report
         if: matrix.java == '21' && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v7
@@ -78,6 +83,10 @@ jobs:
       - name: Starter end-to-end tests on Spring Boot 4
         working-directory: java
         run: mvn -B -ntp verify -pl secure-spring-boot-starter -am -Dspring-boot.version=4.2.0
+
+      - name: Report failed tests
+        if: failure()
+        run: node .github/scripts/report-test-failures.mjs java
 
   node:
     name: Node ${{ matrix.node }} (${{ matrix.os }})

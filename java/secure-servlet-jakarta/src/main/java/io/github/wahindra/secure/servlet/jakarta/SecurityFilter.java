@@ -120,7 +120,7 @@ public class SecurityFilter implements Filter {
         View view = new View(request);
 
         HttpServletRequest forward = request;
-        String jsonBody = null;
+        byte[] jsonBody = null;
         boolean tooLarge = false;
         if (engine.wantsBody(view)) {
             int max = engine.getMaxBodyBytes();
@@ -131,13 +131,14 @@ public class SecurityFilter implements Filter {
                 byte[] prefix = readUpTo(request.getInputStream(), max + 1);
                 tooLarge = prefix.length > max;
                 if (!tooLarge) {
-                    jsonBody = new String(prefix, charset(request));
+                    // Raw bytes: the engine decodes them the way the application parser would.
+                    jsonBody = prefix;
                 }
                 forward = new ReplayingRequest(request, prefix);
             }
         }
 
-        SecurityFilterEngine.Verdict v = engine.evaluate(view, jsonBody, tooLarge);
+        SecurityFilterEngine.Verdict v = engine.evaluateBody(view, jsonBody, tooLarge);
         for (Map.Entry<String, String> e : v.getHeaders().entrySet()) {
             response.setHeader(e.getKey(), e.getValue());
         }

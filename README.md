@@ -438,7 +438,7 @@ CORS and rate limiting are opt-in), and each one is also available as a standalo
 
 | Feature | Java (`io.github.wahindra.secure.web`) | JavaScript | What it stops |
 |---|---|---|---|
-| **JSON body inspection** | `SecurityFilterEngine`, servlet filters | `securityMiddleware()` (parsed `req.body`) | Injection payloads in API bodies. The servlet filter reads the body once and replays it unchanged to the app. |
+| **JSON body inspection** | `SecurityFilterEngine`, servlet filters | `securityMiddleware()` (parsed `req.body`) | Injection payloads in API bodies, on any method (Spring binds `@RequestBody` on GET too). The servlet filter reads the body once, decodes it the way Jackson does (UTF-8/16/32 detected from the bytes, plus the declared charset, strictly), and replays it unchanged. A body that won't decode cleanly is rejected. |
 | **Inspection budget** | `HttpRequestInspector.builder().maxValues(2000).maxInspectedChars(256 KB).maxJsonDepth(20)` | `new HttpRequestInspector({ maxValues, maxInspectedChars, maxDepth })` | Payloads hidden behind padding, and requests built to burn CPU. Hitting a limit counts as malicious (fail closed). JSON bodies over 1 MB are rejected in block mode. |
 | **Rate limiting** | `RateLimiter.perMinute(300)`; `secure.rate-limit.*` | `RateLimiter.perMinute(300)`, `rateLimit()` middleware | Scraping, enumeration, brute force on any endpoint. Token bucket per key, 429 with `Retry-After` and `RateLimit-*` headers, bounded memory. |
 | **Strict CORS** | `CorsPolicy.builder().allowOrigins(...)`; `secure.cors.*` | `new CorsPolicy({ allowOrigins })`, `cors()` middleware | Any origin reading your API with the user's cookies. Never reflects `Origin`, never allows `null`, refuses `*` with credentials, answers preflights directly. |
@@ -774,10 +774,10 @@ malicious. Findings never contain the input text, so they are safe to log.
 
 | | Tests | Line coverage | Branch coverage |
 |---|---:|---:|---:|
-| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 369 passed, 1 skipped* | 83.1% | 69.4% |
+| Java `secure-core` (JaCoCo 0.8.16, JDK 21) | 372 passed, 1 skipped\* | 83.1% | 69.4% |
 | JavaScript (`node --experimental-test-coverage`) | 82 passed | 92.6% | 82.5% |
 | Java servlet filters (javax, jakarta) | 8 + 8 passed | not measured | not measured |
-| Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 7 passed on each | not measured | not measured |
+| Spring Boot starter, end-to-end (Boot 3.5 and 4.2) | 9 passed on each | not measured | not measured |
 
 \* The symlink-escape test is skipped on Windows unless symlinks are permitted (admin rights or
 Developer Mode). The JavaScript equivalent runs and passes.

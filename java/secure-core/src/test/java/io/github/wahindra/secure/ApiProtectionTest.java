@@ -251,13 +251,59 @@ class ApiProtectionTest {
     @Test
     void engineJsonBodyAndOversizedBody() {
         SecurityFilterEngine engine = SecurityFilterEngine.builder().maxBodyBytes(100).build();
-        Req post = new Req("POST", "/api/search").header("Content-Type", "application/json; charset=utf-8");
+        Req post = new Req("POST", "/api/search").header("Content-Type", "application/json; charset=utf-8").header("Content-Length", "20");
         assertTrue(engine.wantsBody(post));
-        assertFalse(engine.wantsBody(new Req("GET", "/x").header("Content-Type", "application/json")));
-        assertFalse(engine.wantsBody(new Req("POST", "/x").header("Content-Type", "multipart/form-data")));
+        assertFalse(engine.wantsBody(new Req("GET", "/x").header("Content-Type", "application/json")), "GET without a body");
+        assertFalse(engine.wantsBody(new Req("POST", "/x").header("Content-Type", "multipart/form-data").header("Content-Length", "9")));
         assertEquals(400, engine.evaluate(post, "{\"q\":\"' OR 1=1--\"}", false).getStatus());
         assertTrue(engine.evaluate(post, "{\"q\":\"shoes\"}", false).isProceed());
         assertEquals(400, engine.evaluate(post, null, true).getStatus(), "too large to inspect: fail closed");
+    }
+
+    /** Inspection must read the body the way Jackson does, or an encoded payload slips through. */
+    @Test
+    void jsonBodyEncodingCannotHidePayloads() throws Exception {
+        SecurityFilterEngine engine = SecurityFilterEngine.defaults();
+        String attack = "{\"q\":\"' OR 1=1--\"}";
+        Map<String, java.nio.charset.Charset> encodings = new LinkedHashMap<String, java.nio.charset.Charset>();
+        encodings.put("UTF-16LE", java.nio.charset.StandardCharsets.UTF_16LE);
+        encodings.put("UTF-16BE", java.nio.charset.StandardCharsets.UTF_16BE);
+        encodings.put("UTF-32LE", java.nio.charset.Charset.forName("UTF-32LE"));
+        encodings.put("UTF-32BE", java.nio.charset.Charset.forName("UTF-32BE"));
+        for (Map.Entry<String, java.nio.charset.Charset> e : encodings.entrySet()) {
+            byte[] noBom = attack.getBytes(e.getValue());
+            // No charset declared (Jackson auto-detects), a mismatching one, and the honest one.
+            for (String ct : new String[] {"application/json", "application/json; charset=utf-8", "application/json; charset=" + e.getKey()}) {
+                Req post = new Req("POST", "/api").header("Content-Type", ct).header("Content-Length", String.valueOf(noBom.length));
+                assertEquals(400, engine.evaluateBody(post, noBom, false).getStatus(), e.getKey() + " / " + ct);
+            }
+        }
+        // With a byte order mark.
+        byte[] bom = ("﻿" + attack).getBytes(java.nio.charset.StandardCharsets.UTF_16BE);
+        assertEquals(400, engine.evaluateBody(new Req("POST", "/api").header("Content-Type", "application/json")
+                .header("Content-Length", "1"), bom, false).getStatus());
+        // Clean UTF-16 bodies still pass.
+        byte[] clean = "{\"q\":\"shoes\"}".getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+        assertTrue(engine.evaluateBody(new Req("POST", "/api").header("Content-Type", "application/json")
+                .header("Content-Length", "1"), clean, false).isProceed());
+    }
+
+    @Test
+    void undecodableJsonBodyIsRejected() {
+        byte[] invalidUtf8 = new byte[] {'{', '"', 'q', '"', ':', '"', (byte) 0xc3, (byte) 0x28, '"', '}'};
+        SecurityFilterEngine.Verdict v = SecurityFilterEngine.defaults().evaluateBody(
+                new Req("POST", "/api").header("Content-Type", "application/json; charset=utf-8").header("Content-Length", "10"), invalidUtf8, false);
+        assertEquals(400, v.getStatus());
+    }
+
+    @Test
+    void jsonBodyOnGetIsInspectedToo() {
+        SecurityFilterEngine engine = SecurityFilterEngine.defaults();
+        Req get = new Req("GET", "/api/search").header("Content-Type", "application/json").header("Content-Length", "20");
+        assertTrue(engine.wantsBody(get), "Spring binds @RequestBody on GET");
+        assertEquals(400, engine.evaluateBody(get, "{\"q\":\"' OR 1=1--\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), false).getStatus());
+        assertFalse(engine.wantsBody(new Req("GET", "/api/search").header("Content-Type", "application/json")), "no body: nothing to read");
+        assertTrue(engine.wantsBody(new Req("POST", "/x").header("Content-Type", "application/json").header("Transfer-Encoding", "chunked")));
     }
 
     @Test

@@ -28,4 +28,16 @@ class WithoutStarterTest {
         List<AttackProbe.Result> results = AttackProbe.run(new AttackProbe.Target(base + "/api/search?q=FUZZ").only("xss"), null);
         assertTrue(results.stream().anyMatch(r -> r.getSeverity() == Severity.HIGH), "XSS must be found without the starter");
     }
+
+    /** Control for the UTF-16 test: Spring really decodes such a body, so the attack is real. */
+    @Test
+    void springDecodesUtf16JsonBodies() throws Exception {
+        String base = "http://127.0.0.1:" + env.getProperty("local.server.port");
+        java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/api/search"))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray("{\"q\":\"<b>x</b>\"}".getBytes(java.nio.charset.StandardCharsets.UTF_16LE)))
+                .build();
+        java.net.http.HttpResponse<String> r = java.net.http.HttpClient.newHttpClient().send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertTrue(r.statusCode() == 200 && r.body().contains("<b>x</b>"), "Jackson must decode UTF-16: " + r.statusCode() + " " + r.body());
+    }
 }
