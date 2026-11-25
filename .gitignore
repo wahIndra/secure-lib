@@ -4,6 +4,7 @@ target/
 node_modules/
 *.tgz
 js/devtools/
+js/LICENSE
 
 # Scanner / coverage reports
 *.sarif
