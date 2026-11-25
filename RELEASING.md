@@ -11,7 +11,7 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
 ```
 
-Released so far: **0.1.0** (2026-11-24). Pick the next version by
+Released so far: **0.1.0** (2026-11-24), **0.2.0** (2026-11-25). Pick the next version by
 [semantic versioning](https://semver.org): patch for fixes, minor for new features, major for
 breaking changes.
 

@@ -14,7 +14,7 @@ OWASP Top 10 prevention helpers for **Java 8+** and **Node.js 20+**, with zero r
 <dependency>
   <groupId>io.github.wahindra</groupId>
   <artifactId>secure-servlet-jakarta</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
@@ -113,11 +113,11 @@ Every artifact ships with sources and javadoc, and is signed with key
 <dependency>
   <groupId>io.github.wahindra</groupId>
   <artifactId>secure-servlet-jakarta</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
-Gradle: `implementation("io.github.wahindra:secure-servlet-jakarta:0.1.0")`.
+Gradle: `implementation("io.github.wahindra:secure-servlet-jakarta:0.2.0")`.
 
 Unreleased changes on `main` are available as `0.1.0-SNAPSHOT` after `mvn install` from a
 clone (local Maven repository only).
@@ -489,12 +489,12 @@ and payloads (`devtools/probe-payloads.txt`).
 | Checking object-level authorization | `secure idor` | Fetches one object as its owner, as another user and logged out; reports if anyone but the owner gets it |
 
 ```bash
-# Java (any JDK 8+). The jar has no dependencies: download secure-core-0.1.0.jar from the
+# Java (any JDK 8+). The jar has no dependencies: download secure-core-0.2.0.jar from the
 # GitHub release, or from Maven Central:
-curl -LO https://repo1.maven.org/maven2/io/github/wahindra/secure-core/0.1.0/secure-core-0.1.0.jar
-java -jar secure-core-0.1.0.jar scan src/
-java -jar secure-core-0.1.0.jar check "1;SELECT pg_sleep(5)--"
-java -jar secure-core-0.1.0.jar probe "http://localhost:8080/api/orders?id=FUZZ"
+curl -LO https://repo1.maven.org/maven2/io/github/wahindra/secure-core/0.2.0/secure-core-0.2.0.jar
+java -jar secure-core-0.2.0.jar scan src/
+java -jar secure-core-0.2.0.jar check "1;SELECT pg_sleep(5)--"
+java -jar secure-core-0.2.0.jar probe "http://localhost:8080/api/orders?id=FUZZ"
 
 # Node (npm install --save-dev @wahindra/secure, or run without installing: npx @wahindra/secure scan src/)
 npx secure scan src/
