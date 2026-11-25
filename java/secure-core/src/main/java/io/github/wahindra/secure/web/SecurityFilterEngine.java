@@ -114,8 +114,11 @@ public final class SecurityFilterEngine {
         // Any method: Spring binds @RequestBody on GET too, so a body on GET must not skip inspection.
         // Only an explicit Content-Length: 0 means "no body". An unknown length (-1) must be read:
         // HTTP/2 needs neither Content-Length nor Transfer-Encoding, and the app still parses the body.
+        // Transfer-Encoding wins over Content-Length (RFC 9112), so "Content-Length: 0" next to it
+        // proves nothing: read the body.
         String ct = request.contentType();
-        if (request.contentLength() == 0 || ct == null) {
+        boolean noBody = request.contentLength() == 0 && request.header("Transfer-Encoding") == null;
+        if (noBody || ct == null) {
             return false;
         }
         String t = ct.toLowerCase(Locale.ROOT);

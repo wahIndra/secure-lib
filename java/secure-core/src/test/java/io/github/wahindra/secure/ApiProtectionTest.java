@@ -312,6 +312,8 @@ class ApiProtectionTest {
         SecurityFilterEngine engine = SecurityFilterEngine.defaults();
         Req h2 = new Req("POST", "/api/search").header("Content-Type", "application/json");
         assertTrue(engine.wantsBody(h2), "unknown length must be read");
+        assertTrue(engine.wantsBody(new Req("POST", "/api/search").header("Content-Type", "application/json")
+                .header("Content-Length", "0").header("Transfer-Encoding", "chunked")), "Transfer-Encoding overrides Content-Length: 0");
         assertEquals(400, engine.evaluateBody(h2, "{\"q\":\"' OR 1=1--\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), false).getStatus());
         assertTrue(engine.evaluateBody(new Req("GET", "/api/search").header("Content-Type", "application/json"), new byte[0], false).isProceed(),
                 "reading turned up no body: the request passes");
