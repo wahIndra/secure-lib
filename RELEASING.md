@@ -7,11 +7,11 @@ version on `main`.
 
 ```bash
 git checkout main && git pull
-git tag -a v0.2.0 -m "v0.2.0"
-git push origin v0.2.0
+git tag -a v0.4.0 -m "v0.4.0"
+git push origin v0.4.0
 ```
 
-Released so far: **0.1.0** (2026-11-24), **0.2.0** (2026-11-25). Pick the next version by
+Released so far: **0.1.0** (2026-11-24), **0.2.0** (2026-11-25), **0.3.0** (2026-11-26). Pick the next version by
 [semantic versioning](https://semver.org): patch for fixes, minor for new features, major for
 breaking changes.
 
@@ -25,7 +25,7 @@ breaking changes.
    `secure-core-X.Y.Z.jar`.
 
 Before tagging, replace `unreleased` with the date in the version's `CHANGELOG.md` heading, e.g.
-`## [0.2.0] - 2026-12-01`, and update the version in the README install snippets.
+`## [0.4.0] - 2026-12-15`, and update the version in the README install snippets.
 
 If any step fails, nothing later runs. Maven Central and npm releases cannot be overwritten
 or deleted. To fix a bad release, tag the next patch version.
